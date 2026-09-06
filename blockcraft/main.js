@@ -71,12 +71,201 @@ function nearestCraftingTable(maxDist){
   return false;
 }
 
-function shade(hex, f){
-  const r = Math.min(255, ((hex>>16)&255)*f);
-  const g = Math.min(255, ((hex>>8)&255)*f);
-  const b = Math.min(255, (hex&255)*f);
-  return [r/255, g/255, b/255];
+// ---------- Texture atlas (procedurally drawn pixel-art, no external image assets) ----------
+const TILE = 16, ATLAS_COLS = 4, ATLAS_ROWS = 4;
+const T_GRASS_TOP=0, T_GRASS_SIDE=1, T_DIRT=2, T_STONE=3, T_SAND=4, T_LOG_SIDE=5, T_LOG_TOP=6,
+      T_LEAVES=7, T_PLANKS=8, T_BEDROCK=9, T_CRAFT_TOP=10, T_CRAFT_SIDE=11, T_BRICKS=12, T_WATER=13;
+
+function hexRGB(hex){ return [(hex>>16)&255, (hex>>8)&255, hex&255]; }
+function rgbStr(r,g,b){ return `rgb(${r|0},${g|0},${b|0})`; }
+function shadeStr(hex, f, jitter){
+  let [r,g,b] = hexRGB(hex);
+  const j = jitter ? (Math.random()*2-1)*jitter : 0;
+  r = Math.max(0,Math.min(255, r*f+j));
+  g = Math.max(0,Math.min(255, g*f+j));
+  b = Math.max(0,Math.min(255, b*f+j));
+  return rgbStr(r,g,b);
 }
+function fillTile(ctx,x0,y0,baseHex){
+  ctx.fillStyle = rgbStr(...hexRGB(baseHex));
+  ctx.fillRect(x0,y0,TILE,TILE);
+}
+function speckle(ctx,x0,y0,baseHex,count,jitter){
+  for(let i=0;i<count;i++){
+    const px = x0 + Math.floor(Math.random()*TILE);
+    const py = y0 + Math.floor(Math.random()*TILE);
+    ctx.fillStyle = shadeStr(baseHex, 0.8+Math.random()*0.4, jitter||0);
+    ctx.fillRect(px,py,1,1);
+  }
+}
+function drawGrassTop(ctx,x0,y0){
+  fillTile(ctx,x0,y0,0x5b8a3a);
+  speckle(ctx,x0,y0,0x5b8a3a,70,18);
+}
+function drawGrassSide(ctx,x0,y0){
+  fillTile(ctx,x0,y0,0x7a5230);
+  speckle(ctx,x0,y0,0x7a5230,40,14);
+  for(let x=0;x<TILE;x++){
+    const h = 3 + (x%3===0 ? 1 : 0);
+    for(let y=0;y<h;y++){
+      ctx.fillStyle = shadeStr(0x5b8a3a, 0.85+Math.random()*0.3, 12);
+      ctx.fillRect(x0+x, y0+TILE-1-y, 1, 1);
+    }
+  }
+}
+function drawDirt(ctx,x0,y0){
+  fillTile(ctx,x0,y0,0x7a5230);
+  speckle(ctx,x0,y0,0x7a5230,60,16);
+}
+function drawStone(ctx,x0,y0){
+  fillTile(ctx,x0,y0,0x8a8a8a);
+  speckle(ctx,x0,y0,0x8a8a8a,70,20);
+  for(let i=0;i<4;i++){
+    const x=x0+Math.floor(Math.random()*TILE), y=y0+Math.floor(Math.random()*TILE);
+    ctx.fillStyle = shadeStr(0x8a8a8a,0.6,6);
+    ctx.fillRect(x,y,1+Math.floor(Math.random()*2),1);
+  }
+}
+function drawSand(ctx,x0,y0){
+  fillTile(ctx,x0,y0,0xe0d18f);
+  speckle(ctx,x0,y0,0xe0d18f,50,14);
+}
+function drawLogSide(ctx,x0,y0){
+  fillTile(ctx,x0,y0,0x6b4a2b);
+  speckle(ctx,x0,y0,0x6b4a2b,25,8);
+  for(let x=0;x<TILE;x+=3){
+    for(let y=0;y<TILE;y++){
+      if(Math.random()<0.75){
+        ctx.fillStyle = shadeStr(0x6b4a2b,0.7,6);
+        ctx.fillRect(x0+x,y0+y,1,1);
+      }
+    }
+  }
+}
+function drawLogTop(ctx,x0,y0){
+  fillTile(ctx,x0,y0,0xc9a06b);
+  const cx=x0+TILE/2, cy=y0+TILE/2;
+  for(let y=0;y<TILE;y++){
+    for(let x=0;x<TILE;x++){
+      const d = Math.hypot(x0+x+0.5-cx, y0+y+0.5-cy);
+      const ring = Math.floor(d/1.6)%2;
+      ctx.fillStyle = shadeStr(0xc9a06b, ring===0 ? 1.0 : 0.82, 6);
+      ctx.fillRect(x0+x,y0+y,1,1);
+    }
+  }
+}
+function drawLeaves(ctx,x0,y0){
+  fillTile(ctx,x0,y0,0x3f7d34);
+  speckle(ctx,x0,y0,0x3f7d34,110,26);
+}
+function drawPlanks(ctx,x0,y0){
+  fillTile(ctx,x0,y0,0xb8894f);
+  speckle(ctx,x0,y0,0xb8894f,40,10);
+  for(let y=0;y<TILE;y+=4){
+    ctx.fillStyle = shadeStr(0xb8894f,0.65,4);
+    ctx.fillRect(x0,y0+y,TILE,1);
+    const seam = Math.floor(Math.random()*TILE);
+    ctx.fillStyle = shadeStr(0xb8894f,0.75,4);
+    ctx.fillRect(x0+seam,y0+y,1,3);
+  }
+}
+function drawBedrock(ctx,x0,y0){
+  fillTile(ctx,x0,y0,0x2b2b2b);
+  for(let i=0;i<40;i++){
+    const x=x0+Math.floor(Math.random()*TILE), y=y0+Math.floor(Math.random()*TILE);
+    ctx.fillStyle = shadeStr(0x2b2b2b,0.5+Math.random()*0.9,10);
+    const s = 1+Math.floor(Math.random()*2);
+    ctx.fillRect(x,y,s,s);
+  }
+}
+function drawCraftTop(ctx,x0,y0){
+  drawPlanks(ctx,x0,y0);
+  ctx.fillStyle = shadeStr(0x3a2a1a,1,4);
+  ctx.fillRect(x0+1,y0+1,TILE-2,1);
+  ctx.fillRect(x0+1,y0+TILE-2,TILE-2,1);
+  ctx.fillRect(x0+1,y0+1,1,TILE-2);
+  ctx.fillRect(x0+TILE-2,y0+1,1,TILE-2);
+  ctx.fillRect(x0+TILE/2-1,y0+3,2,TILE-6);
+  ctx.fillRect(x0+3,y0+TILE/2-1,TILE-6,2);
+}
+function drawCraftSide(ctx,x0,y0){
+  drawPlanks(ctx,x0,y0);
+  ctx.fillStyle = shadeStr(0x3a2a1a,1,4);
+  ctx.fillRect(x0+2,y0+6,TILE-4,4);
+  ctx.fillStyle = shadeStr(0xc9a06b,1,4);
+  ctx.fillRect(x0+4,y0+7,2,2);
+  ctx.fillRect(x0+TILE-6,y0+7,2,2);
+}
+function drawBricks(ctx,x0,y0){
+  fillTile(ctx,x0,y0,0x9a4a3a);
+  speckle(ctx,x0,y0,0x9a4a3a,30,10);
+  const mortar = shadeStr(0x5a3a30,1,0);
+  let row=0;
+  for(let y=0;y<TILE;y+=4){
+    ctx.fillStyle = mortar;
+    ctx.fillRect(x0,y0+y,TILE,1);
+    const offset = (row%2===0)?0:4;
+    for(let x=offset;x<TILE;x+=8){
+      ctx.fillStyle = mortar;
+      ctx.fillRect(x0+x,y0+y,1,4);
+    }
+    row++;
+  }
+}
+function drawWater(ctx,x0,y0){
+  fillTile(ctx,x0,y0,0x3a6fd8);
+  speckle(ctx,x0,y0,0x3a6fd8,40,16);
+  for(let i=0;i<3;i++){
+    const y = y0+Math.floor(Math.random()*TILE);
+    ctx.fillStyle = shadeStr(0x3a6fd8,1.25,6);
+    ctx.fillRect(x0,y,TILE,1);
+  }
+}
+function buildAtlas(){
+  const canvas = document.createElement('canvas');
+  canvas.width = TILE*ATLAS_COLS;
+  canvas.height = TILE*ATLAS_ROWS;
+  const ctx = canvas.getContext('2d');
+  const draw = [drawGrassTop, drawGrassSide, drawDirt, drawStone, drawSand, drawLogSide, drawLogTop,
+                drawLeaves, drawPlanks, drawBedrock, drawCraftTop, drawCraftSide, drawBricks, drawWater];
+  draw.forEach((fn, i)=> fn(ctx, (i%ATLAS_COLS)*TILE, Math.floor(i/ATLAS_COLS)*TILE));
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.magFilter = THREE.NearestFilter;
+  tex.minFilter = THREE.NearestFilter;
+  tex.generateMipmaps = false;
+  tex.wrapS = THREE.ClampToEdgeWrapping;
+  tex.wrapT = THREE.ClampToEdgeWrapping;
+  return tex;
+}
+function tileUV(i){
+  const col = i % ATLAS_COLS, row = Math.floor(i/ATLAS_COLS);
+  return {
+    u0: col/ATLAS_COLS, u1: (col+1)/ATLAS_COLS,
+    vBottom: 1-(row+1)/ATLAS_ROWS, vTop: 1-row/ATLAS_ROWS,
+  };
+}
+const BLOCK_TILES = {
+  [GRASS]:  {top:T_GRASS_TOP, side:T_GRASS_SIDE, bottom:T_DIRT},
+  [DIRT]:   {top:T_DIRT, side:T_DIRT, bottom:T_DIRT},
+  [STONE]:  {top:T_STONE, side:T_STONE, bottom:T_STONE},
+  [SAND]:   {top:T_SAND, side:T_SAND, bottom:T_SAND},
+  [WOOD]:   {top:T_LOG_TOP, side:T_LOG_SIDE, bottom:T_LOG_TOP},
+  [LEAVES]: {top:T_LEAVES, side:T_LEAVES, bottom:T_LEAVES},
+  [PLANKS]: {top:T_PLANKS, side:T_PLANKS, bottom:T_PLANKS},
+  [WATER]:  {top:T_WATER, side:T_WATER, bottom:T_WATER},
+  [BEDROCK]:{top:T_BEDROCK, side:T_BEDROCK, bottom:T_BEDROCK},
+  [CRAFTING_TABLE]: {top:T_CRAFT_TOP, side:T_CRAFT_SIDE, bottom:T_PLANKS},
+  [BRICKS]: {top:T_BRICKS, side:T_BRICKS, bottom:T_BRICKS},
+};
+// per-face-direction UV winding (0/1 flags select u0/u1 and vBottom/vTop), aligned to FACES order below
+const UV_PATTERNS = [
+  [[0,0],[0,1],[1,1],[1,0]], // +x
+  [[1,0],[1,1],[0,1],[0,0]], // -x
+  [[0,0],[0,1],[1,1],[1,0]], // +y
+  [[0,1],[0,0],[1,0],[1,1]], // -y
+  [[1,0],[1,1],[0,1],[0,0]], // +z
+  [[0,0],[0,1],[1,1],[1,0]], // -z
+];
 
 // ---------- Seeded noise (classic Perlin, seeded permutation) ----------
 function mulberry32(a){
@@ -245,12 +434,13 @@ const FACES = [
   { n:[0,0,-1], c:[[0,0,0],[0,1,0],[1,1,0],[1,0,0]] },
 ];
 
-const solidMaterial = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
-const waterMaterial = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide, transparent:true, opacity:0.75 });
+const atlasTexture = buildAtlas();
+const solidMaterial = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide, map: atlasTexture });
+const waterMaterial = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide, map: atlasTexture, transparent:true, opacity:0.75 });
 
 function buildChunkGeometries(cx,cz){
-  const solid = {positions:[],normals:[],colors:[],indices:[]};
-  const water = {positions:[],normals:[],colors:[],indices:[]};
+  const solid = {positions:[],normals:[],colors:[],uvs:[],indices:[]};
+  const water = {positions:[],normals:[],colors:[],uvs:[],indices:[]};
   const x0=cx*CHUNK_SIZE, z0=cz*CHUNK_SIZE;
   for(let x=x0;x<x0+CHUNK_SIZE;x++){
     for(let z=z0;z<z0+CHUNK_SIZE;z++){
@@ -259,7 +449,9 @@ function buildChunkGeometries(cx,cz){
         if(b===AIR) continue;
         const isWater = b===WATER;
         const bucket = isWater ? water : solid;
-        for(const f of FACES){
+        const tiles = BLOCK_TILES[b];
+        for(let fi=0; fi<FACES.length; fi++){
+          const f = FACES[fi];
           const nb = getBlock(x+f.n[0], y+f.n[1], z+f.n[2]);
           let draw;
           if(nb===AIR) draw = true;
@@ -267,12 +459,17 @@ function buildChunkGeometries(cx,cz){
           else draw = false;
           if(!draw) continue;
           const shadeF = f.n[1]===1 ? 1.0 : (f.n[1]===-1 ? 0.5 : 0.75);
-          const col = shade(BLOCK_COLOR[b], shadeF);
+          const tileIdx = f.n[1]===1 ? tiles.top : (f.n[1]===-1 ? tiles.bottom : tiles.side);
+          const {u0,u1,vBottom,vTop} = tileUV(tileIdx);
+          const pattern = UV_PATTERNS[fi];
           const base = bucket.positions.length/3;
-          for(const c of f.c){
+          for(let ci=0; ci<4; ci++){
+            const c = f.c[ci];
             bucket.positions.push(x+c[0], y+c[1], z+c[2]);
             bucket.normals.push(f.n[0],f.n[1],f.n[2]);
-            bucket.colors.push(col[0],col[1],col[2]);
+            bucket.colors.push(shadeF,shadeF,shadeF);
+            const [uf,vf] = pattern[ci];
+            bucket.uvs.push(uf?u1:u0, vf?vTop:vBottom);
           }
           bucket.indices.push(base,base+1,base+2, base,base+2,base+3);
         }
@@ -285,6 +482,7 @@ function buildChunkGeometries(cx,cz){
     geo.setAttribute('position', new THREE.Float32BufferAttribute(bucket.positions,3));
     geo.setAttribute('normal', new THREE.Float32BufferAttribute(bucket.normals,3));
     geo.setAttribute('color', new THREE.Float32BufferAttribute(bucket.colors,3));
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute(bucket.uvs,2));
     geo.setIndex(bucket.indices);
     return geo;
   }
