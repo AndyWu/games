@@ -537,6 +537,92 @@ function spawnPlayer(){
   player.vel.set(0,0,0);
 }
 
+// ---------- Blocky character model (the player's own body; reusable for other players later) ----------
+function createCharacterMesh(){
+  const group = new THREE.Group();
+  const skinMat = new THREE.MeshLambertMaterial({ color: 0xd9a066 });
+  const shirtMat = new THREE.MeshLambertMaterial({ color: 0x3b6ea5 });
+  const pantsMat = new THREE.MeshLambertMaterial({ color: 0x3a3a3a });
+
+  function box(w,h,d,mat,pivotTop){
+    const geo = new THREE.BoxGeometry(w,h,d);
+    if(pivotTop) geo.translate(0,-h/2,0);
+    return new THREE.Mesh(geo, mat);
+  }
+
+  const head = box(0.5,0.5,0.5, skinMat);
+  head.position.set(0, 1.55, 0);
+  const body = box(0.5,0.75,0.28, shirtMat);
+  body.position.set(0, 1.05, 0);
+  const armL = box(0.2,0.7,0.2, shirtMat, true);
+  armL.position.set(-0.35, 1.4, 0);
+  const armR = box(0.2,0.7,0.2, shirtMat, true);
+  armR.position.set(0.35, 1.4, 0);
+  const legL = box(0.22,0.7,0.22, pantsMat, true);
+  legL.position.set(-0.14, 0.7, 0);
+  const legR = box(0.22,0.7,0.22, pantsMat, true);
+  legR.position.set(0.14, 0.7, 0);
+
+  group.add(head, body, armL, armR, legL, legR);
+  group.userData.parts = { armL, armR, legL, legR };
+  return group;
+}
+let thirdPerson = false;
+let characterMesh;
+let walkPhase = 0, walkAmp = 0;
+function updateCharacterAnim(dt, moving, sprinting){
+  walkAmp += ((moving?1:0) - walkAmp) * Math.min(1, dt*8);
+  walkPhase += dt * (sprinting ? 11 : 7);
+  const swing = Math.sin(walkPhase) * 0.6 * walkAmp;
+  const { armL, armR, legL, legR } = characterMesh.userData.parts;
+  armR.rotation.x = swing;
+  legL.rotation.x = swing;
+  armL.rotation.x = -swing;
+  legR.rotation.x = -swing;
+  characterMesh.position.set(player.pos.x, player.pos.y, player.pos.z);
+  characterMesh.rotation.y = player.yaw;
+}
+
+// ---------- First-person view-model (arm + held block, rendered as a separate overlay pass) ----------
+let handScene, handCamera, handGroup, armMesh, heldItemMesh;
+let handBobPhase = 0, handBobAmp = 0, swingT = 0;
+function buildHandModel(){
+  handScene = new THREE.Scene();
+  handScene.add(new THREE.HemisphereLight(0xffffff, 0x445533, 1.0));
+  handCamera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.01, 10);
+
+  handGroup = new THREE.Group();
+  const skinMat = new THREE.MeshLambertMaterial({ color: 0xd9a066 });
+  const armGeo = new THREE.BoxGeometry(0.22,0.6,0.22);
+  armGeo.translate(0,-0.3,0);
+  armMesh = new THREE.Mesh(armGeo, skinMat);
+  armMesh.position.set(0.32,-0.05,-0.55);
+  armMesh.rotation.set(0.15, 0, -0.25);
+  handGroup.add(armMesh);
+
+  heldItemMesh = new THREE.Mesh(new THREE.BoxGeometry(0.22,0.22,0.22), new THREE.MeshLambertMaterial({color:0xffffff}));
+  heldItemMesh.position.set(0.32,-0.34,-0.78);
+  handGroup.add(heldItemMesh);
+
+  handScene.add(handGroup);
+  updateHeldItemColor();
+}
+function updateHeldItemColor(){
+  if(!heldItemMesh) return;
+  heldItemMesh.material.color.setHex(BLOCK_COLOR[HOTBAR[selectedSlot]]);
+}
+function triggerSwing(){ swingT = 1; }
+function updateHandView(dt, moving, sprinting){
+  handBobAmp += ((moving?1:0) - handBobAmp) * Math.min(1, dt*8);
+  handBobPhase += dt * (sprinting?14:9);
+  const bobX = Math.sin(handBobPhase) * 0.02 * handBobAmp;
+  const bobY = Math.abs(Math.sin(handBobPhase*2)) * 0.015 * handBobAmp;
+  swingT = Math.max(0, swingT - dt*4);
+  const swing = Math.sin(swingT*Math.PI) * 0.9;
+  handGroup.position.set(bobX, -bobY, 0);
+  armMesh.rotation.x = 0.15 - swing;
+}
+
 function blockSolid(bx,by,bz){
   const b = getBlock(bx,by,bz);
   return b!==AIR && b!==WATER;
@@ -626,6 +712,7 @@ function breakBlock(){
   onBlockChanged(hit.x,hit.y,hit.z);
   updateHotbarUI();
   saveEdits();
+  triggerSwing();
 }
 function placeBlock(){
   const hit = raycastBlock();
@@ -647,6 +734,7 @@ function placeBlock(){
   onBlockChanged(x,y,z);
   updateHotbarUI();
   saveEdits();
+  triggerSwing();
 }
 
 // ---------- Input ----------
@@ -660,10 +748,11 @@ window.addEventListener('keydown', e=>{
     if(locked && nearestCraftingTable(4)) openCrafting();
     return;
   }
+  if(e.code==='KeyV' && locked){ thirdPerson = !thirdPerson; return; }
   if(e.code.startsWith('Digit')){
     let n = parseInt(e.code.slice(5),10);
     if(n===0) n = 10;
-    if(n>=1 && n<=HOTBAR.length){ selectedSlot = n-1; updateHotbarUI(); }
+    if(n>=1 && n<=HOTBAR.length){ selectedSlot = n-1; updateHotbarUI(); updateHeldItemColor(); }
   }
 });
 window.addEventListener('keyup', e=>{ keys[e.code]=false; });
@@ -671,6 +760,7 @@ window.addEventListener('wheel', e=>{
   if(!locked) return;
   selectedSlot = (selectedSlot + (e.deltaY>0?1:-1) + HOTBAR.length) % HOTBAR.length;
   updateHotbarUI();
+  updateHeldItemColor();
 });
 
 const overlay = document.getElementById('overlay');
@@ -796,16 +886,25 @@ function init(){
   sun.position.set(80,120,40);
   scene.add(sun);
 
+  characterMesh = createCharacterMesh();
+  characterMesh.visible = false;
+  scene.add(characterMesh);
+  buildHandModel();
+  renderer.autoClear = false;
+
   generateWorld();
   loadEdits();
   loadInventory();
   rebuildAllChunks();
   spawnPlayer();
   updateHotbarUI();
+  updateHeldItemColor();
 
   window.addEventListener('resize', ()=>{
     camera.aspect = window.innerWidth/window.innerHeight;
     camera.updateProjectionMatrix();
+    handCamera.aspect = window.innerWidth/window.innerHeight;
+    handCamera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
 
@@ -821,10 +920,33 @@ function animate(now){
 
   if(locked) updatePlayer(dt);
 
-  camera.rotation.set(player.pitch, player.yaw, 0);
-  camera.position.set(player.pos.x, player.pos.y+player.eye, player.pos.z);
+  const moving = locked && (keys['KeyW']||keys['KeyA']||keys['KeyS']||keys['KeyD']);
+  const sprinting = !!(keys['ShiftLeft']||keys['ShiftRight']);
+  updateCharacterAnim(dt, moving, sprinting);
+  updateHandView(dt, moving, sprinting);
 
+  if(thirdPerson){
+    characterMesh.visible = true;
+    const dir = getLookDir(player.yaw, player.pitch);
+    const dist = 4.5;
+    camera.position.set(
+      player.pos.x - dir.x*dist,
+      player.pos.y + player.eye - dir.y*dist,
+      player.pos.z - dir.z*dist
+    );
+    camera.lookAt(player.pos.x, player.pos.y+player.eye, player.pos.z);
+  } else {
+    characterMesh.visible = false;
+    camera.rotation.set(player.pitch, player.yaw, 0);
+    camera.position.set(player.pos.x, player.pos.y+player.eye, player.pos.z);
+  }
+
+  renderer.clear();
   renderer.render(scene, camera);
+  if(!thirdPerson){
+    renderer.clearDepth();
+    renderer.render(handScene, handCamera);
+  }
 
   craftHint.classList.toggle('show', locked && !craftingOpen && nearestCraftingTable(4));
 
