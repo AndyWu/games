@@ -37,12 +37,24 @@ Then visit `http://localhost:8000`.
 - `Shift` — sprint
 - Mouse — look (click the page first to lock the pointer)
 - Left click — break block
-- Right click — place block
-- `1`–`8` or mouse wheel — select block from hotbar
+- Right click — place block (or open the crafting menu if you're looking at a Crafting Table)
+- `1`–`0` or mouse wheel — select block from hotbar
+- `E` — open/close crafting when standing near a Crafting Table
+
+## Crafting
+
+Blocks you break go into your inventory (shown as counts on the hotbar), and placing a block spends one from it. You start with a single Crafting Table — place it on the ground, then right-click it (or stand nearby and press `E`) to open the crafting menu:
+
+- 1 Wood → 4 Planks
+- 2 Planks → 4 Sticks
+- 4 Planks → 1 Crafting Table
+- 4 Stone → 4 Bricks
+
+The Craft button lights up once you have enough materials. Your inventory (like your world edits) is saved to `localStorage`, so it persists across reloads.
 
 ## Notes
 
 - The world is a fixed 64×64 block area with procedurally generated hills, a beach/water line, and scattered trees — regenerated from a fixed seed, so it's the same every time you load it.
-- Block edits (breaking/placing) are saved to the browser's `localStorage`, so your changes persist across reloads on the same device/browser.
+- Block edits and inventory are saved to the browser's `localStorage`, so your progress persists across reloads on the same device/browser.
 - Best played on desktop with a mouse — pointer lock and WASD aren't a good fit for touch screens.
 - Everything is a single `<script>` tag pulling three.js from a CDN (`jsdelivr`), so there's nothing to install or build.

@@ -15,6 +15,7 @@ const SEED = 1337;
 const FAR = 400;
 
 const AIR=0, GRASS=1, DIRT=2, STONE=3, SAND=4, WOOD=5, LEAVES=6, PLANKS=7, WATER=8, BEDROCK=9;
+const CRAFTING_TABLE=10, BRICKS=11, STICK=12;
 
 const BLOCK_COLOR = {
   [GRASS]:  0x5b8a3a,
@@ -26,9 +27,49 @@ const BLOCK_COLOR = {
   [PLANKS]: 0xb8894f,
   [WATER]:  0x3a6fd8,
   [BEDROCK]:0x2b2b2b,
+  [CRAFTING_TABLE]: 0xa5652f,
+  [BRICKS]: 0x9a4a3a,
+  [STICK]:  0xc9a06b,
 };
-const BLOCK_NAME = {[GRASS]:'Grass',[DIRT]:'Dirt',[STONE]:'Stone',[SAND]:'Sand',[WOOD]:'Wood',[LEAVES]:'Leaves',[PLANKS]:'Planks',[WATER]:'Water'};
-const HOTBAR = [GRASS, DIRT, STONE, SAND, WOOD, LEAVES, PLANKS, WATER];
+const BLOCK_NAME = {
+  [GRASS]:'Grass', [DIRT]:'Dirt', [STONE]:'Stone', [SAND]:'Sand', [WOOD]:'Wood',
+  [LEAVES]:'Leaves', [PLANKS]:'Planks', [WATER]:'Water',
+  [CRAFTING_TABLE]:'Crafting Table', [BRICKS]:'Bricks', [STICK]:'Stick',
+};
+const HOTBAR = [GRASS, DIRT, STONE, SAND, WOOD, LEAVES, PLANKS, WATER, CRAFTING_TABLE, BRICKS];
+const COLLECTIBLE = new Set([GRASS, DIRT, STONE, SAND, WOOD, LEAVES, PLANKS, CRAFTING_TABLE, BRICKS]);
+
+// ---------- Crafting ----------
+const RECIPES = [
+  { name:'Planks',         out:{id:PLANKS, qty:4},         in:[{id:WOOD, qty:1}] },
+  { name:'Sticks',         out:{id:STICK, qty:4},          in:[{id:PLANKS, qty:2}] },
+  { name:'Crafting Table', out:{id:CRAFTING_TABLE, qty:1}, in:[{id:PLANKS, qty:4}] },
+  { name:'Bricks',         out:{id:BRICKS, qty:4},         in:[{id:STONE, qty:4}] },
+];
+const inventory = {};
+function invCount(id){ return inventory[id]||0; }
+function invAdd(id,n){ inventory[id] = (inventory[id]||0)+n; }
+function invSub(id,n){ inventory[id] = Math.max(0,(inventory[id]||0)-n); }
+function canCraft(recipe){ return recipe.in.every(ing => invCount(ing.id) >= ing.qty); }
+function craft(recipe){
+  if(!canCraft(recipe)) return false;
+  recipe.in.forEach(ing => invSub(ing.id, ing.qty));
+  invAdd(recipe.out.id, recipe.out.qty);
+  saveInventory();
+  updateHotbarUI();
+  return true;
+}
+
+const craftingTables = new Set();
+function tableKey(x,y,z){ return x+','+y+','+z; }
+function nearestCraftingTable(maxDist){
+  for(const k of craftingTables){
+    const [x,y,z] = k.split(',').map(Number);
+    const dx = (x+0.5)-player.pos.x, dy = (y+0.5)-(player.pos.y+player.eye), dz = (z+0.5)-player.pos.z;
+    if(Math.hypot(dx,dy,dz) <= maxDist) return true;
+  }
+  return false;
+}
 
 function shade(hex, f){
   const r = Math.min(255, ((hex>>16)&255)*f);
@@ -147,6 +188,7 @@ function plantTree(x,y,z){
 
 // ---------- Save / load edits ----------
 const SAVE_KEY = 'blockcraft_edits_v1';
+const INV_KEY = 'blockcraft_inventory_v1';
 const edits = new Map();
 let saveTimer = null;
 function saveEdits(){
@@ -167,9 +209,26 @@ function loadEdits(){
       const [x,y,z] = k.split(',').map(Number);
       setBlock(x,y,z,obj[k]);
       edits.set(k, obj[k]);
+      if(obj[k]===CRAFTING_TABLE) craftingTables.add(k);
+      else craftingTables.delete(k);
     }
     document.getElementById('blockCount').textContent = edits.size;
   }catch(e){}
+}
+let invSaveTimer = null;
+function saveInventory(){
+  clearTimeout(invSaveTimer);
+  invSaveTimer = setTimeout(()=>{
+    try{ localStorage.setItem(INV_KEY, JSON.stringify(inventory)); }catch(e){}
+  }, 300);
+}
+function loadInventory(){
+  try{
+    const raw = localStorage.getItem(INV_KEY);
+    if(!raw){ inventory[CRAFTING_TABLE] = 1; return; }
+    const obj = JSON.parse(raw);
+    for(const k in obj) inventory[k] = obj[k];
+  }catch(e){ inventory[CRAFTING_TABLE] = 1; }
 }
 
 // ---------- Chunked mesh building ----------
@@ -359,10 +418,15 @@ function raycastBlock(maxDist=6, step=0.02){
 function breakBlock(){
   const hit = raycastBlock();
   if(!hit) return;
-  if(getBlock(hit.x,hit.y,hit.z)===BEDROCK) return;
+  const b = getBlock(hit.x,hit.y,hit.z);
+  if(b===BEDROCK) return;
   setBlock(hit.x,hit.y,hit.z,AIR);
-  edits.set(hit.x+','+hit.y+','+hit.z, AIR);
+  const k = hit.x+','+hit.y+','+hit.z;
+  edits.set(k, AIR);
+  craftingTables.delete(k);
+  if(COLLECTIBLE.has(b)){ invAdd(b,1); saveInventory(); }
   onBlockChanged(hit.x,hit.y,hit.z);
+  updateHotbarUI();
   saveEdits();
 }
 function placeBlock(){
@@ -370,14 +434,20 @@ function placeBlock(){
   if(!hit || !hit.prev) return;
   const {x,y,z} = hit.prev;
   if(getBlock(x,y,z)!==AIR) return;
+  const block = HOTBAR[selectedSlot];
+  if(invCount(block)<=0) return;
   const w = player.width/2;
   const px=player.pos.x, py=player.pos.y, pz=player.pos.z;
   const overlapsPlayer = (x+1>px-w && x<px+w && z+1>pz-w && z<pz+w && y<py+player.height && y+1>py);
   if(overlapsPlayer) return;
-  const block = HOTBAR[selectedSlot];
   setBlock(x,y,z, block);
-  edits.set(x+','+y+','+z, block);
+  const k = x+','+y+','+z;
+  edits.set(k, block);
+  if(block===CRAFTING_TABLE) craftingTables.add(k);
+  invSub(block,1);
+  saveInventory();
   onBlockChanged(x,y,z);
+  updateHotbarUI();
   saveEdits();
 }
 
@@ -386,8 +456,15 @@ const keys = {};
 let selectedSlot = 0;
 window.addEventListener('keydown', e=>{
   keys[e.code]=true;
+  if(e.code==='Escape' && craftingOpen){ closeCrafting(false); return; }
+  if(e.code==='KeyE'){
+    if(craftingOpen){ closeCrafting(false); return; }
+    if(locked && nearestCraftingTable(4)) openCrafting();
+    return;
+  }
   if(e.code.startsWith('Digit')){
-    const n = parseInt(e.code.slice(5),10);
+    let n = parseInt(e.code.slice(5),10);
+    if(n===0) n = 10;
     if(n>=1 && n<=HOTBAR.length){ selectedSlot = n-1; updateHotbarUI(); }
   }
 });
@@ -400,10 +477,10 @@ window.addEventListener('wheel', e=>{
 
 const overlay = document.getElementById('overlay');
 let locked = false;
-overlay.addEventListener('click', ()=>{ document.body.requestPointerLock(); });
+overlay.addEventListener('click', ()=>{ if(!craftingOpen) document.body.requestPointerLock(); });
 document.addEventListener('pointerlockchange', ()=>{
   locked = document.pointerLockElement === document.body;
-  overlay.hidden = locked;
+  overlay.hidden = locked || craftingOpen;
 });
 document.addEventListener('mousemove', e=>{
   if(!locked) return;
@@ -415,24 +492,90 @@ document.addEventListener('contextmenu', e=> e.preventDefault());
 document.addEventListener('mousedown', e=>{
   if(!locked) return;
   if(e.button===0) breakBlock();
-  if(e.button===2) placeBlock();
+  if(e.button===2){
+    const hit = raycastBlock();
+    if(hit && getBlock(hit.x,hit.y,hit.z)===CRAFTING_TABLE) openCrafting();
+    else placeBlock();
+  }
 });
+
+function swatchColor(id){ return '#' + BLOCK_COLOR[id].toString(16).padStart(6,'0'); }
 
 function updateHotbarUI(){
   const el = document.getElementById('hotbar');
   el.innerHTML = '';
   HOTBAR.forEach((b,i)=>{
+    const count = invCount(b);
     const slot = document.createElement('div');
-    slot.className = 'slot' + (i===selectedSlot ? ' active' : '');
+    slot.className = 'slot' + (i===selectedSlot ? ' active' : '') + (count<=0 ? ' empty' : '');
     const sw = document.createElement('div');
     sw.className = 'swatch';
-    sw.style.background = '#' + BLOCK_COLOR[b].toString(16).padStart(6,'0');
+    sw.style.background = swatchColor(b);
     slot.appendChild(sw);
     const key = document.createElement('div');
-    key.className='key'; key.textContent = i+1;
+    key.className='key'; key.textContent = (i+1)%10;
     slot.appendChild(key);
+    const count_el = document.createElement('div');
+    count_el.className='count'; count_el.textContent = count;
+    slot.appendChild(count_el);
     slot.title = BLOCK_NAME[b];
     el.appendChild(slot);
+  });
+  if(craftingOpen) renderCrafting();
+}
+
+// ---------- Crafting UI ----------
+let craftingOpen = false;
+const craftingModal = document.getElementById('craftingModal');
+const craftHint = document.getElementById('craftHint');
+document.getElementById('craftingClose').addEventListener('click', ()=> closeCrafting(true));
+craftingModal.addEventListener('click', e=>{ if(e.target===craftingModal) closeCrafting(true); });
+
+function openCrafting(){
+  craftingOpen = true;
+  craftingModal.hidden = false;
+  if(document.pointerLockElement) document.exitPointerLock();
+  overlay.hidden = true;
+  renderCrafting();
+}
+function closeCrafting(relock){
+  craftingOpen = false;
+  craftingModal.hidden = true;
+  if(relock) document.body.requestPointerLock();
+  else overlay.hidden = false;
+}
+function renderCrafting(){
+  const invEl = document.getElementById('craftingInventory');
+  invEl.innerHTML = '';
+  const held = Object.keys(inventory).map(Number).filter(id => invCount(id)>0);
+  if(held.length===0){
+    invEl.innerHTML = '<span style="opacity:0.6">Nothing yet — break some blocks to gather materials.</span>';
+  } else {
+    held.forEach(id=>{
+      const row = document.createElement('div');
+      row.className = 'invItem';
+      row.innerHTML = `<span class="sw" style="background:${swatchColor(id)}"></span>${BLOCK_NAME[id]} × ${invCount(id)}`;
+      invEl.appendChild(row);
+    });
+  }
+
+  const recEl = document.getElementById('craftingRecipes');
+  recEl.innerHTML = '';
+  RECIPES.forEach((r,i)=>{
+    const ok = canCraft(r);
+    const row = document.createElement('div');
+    row.className = 'recipe';
+    const needText = r.in.map(ing => `${ing.qty} ${BLOCK_NAME[ing.id]} (have ${invCount(ing.id)})`).join(', ');
+    row.innerHTML = `
+      <span class="sw" style="background:${swatchColor(r.out.id)}"></span>
+      <div class="info"><b>${r.name} × ${r.out.qty}</b><span class="need${ok?'':' short'}">Needs: ${needText}</span></div>
+    `;
+    const btn = document.createElement('button');
+    btn.textContent = 'Craft';
+    btn.disabled = !ok;
+    btn.addEventListener('click', ()=>{ craft(r); renderCrafting(); });
+    row.appendChild(btn);
+    recEl.appendChild(row);
   });
 }
 
@@ -457,6 +600,7 @@ function init(){
 
   generateWorld();
   loadEdits();
+  loadInventory();
   rebuildAllChunks();
   spawnPlayer();
   updateHotbarUI();
@@ -483,6 +627,8 @@ function animate(now){
   camera.position.set(player.pos.x, player.pos.y+player.eye, player.pos.z);
 
   renderer.render(scene, camera);
+
+  craftHint.classList.toggle('show', locked && !craftingOpen && nearestCraftingTable(4));
 
   fpsTimer += dt; fpsCount++;
   if(fpsTimer>=0.5){

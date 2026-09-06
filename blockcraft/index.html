@@ -14,8 +14,10 @@
   #hotbar{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);display:flex;gap:6px;z-index:10;background:rgba(0,0,0,0.25);padding:6px;border-radius:8px;}
   .slot{width:48px;height:48px;border:2px solid rgba(255,255,255,0.4);border-radius:6px;display:flex;align-items:center;justify-content:center;position:relative;background:rgba(255,255,255,0.08);}
   .slot.active{border-color:#fff;box-shadow:0 0 8px rgba(255,255,255,0.8);}
+  .slot.empty .swatch{opacity:0.3;}
   .slot .swatch{width:30px;height:30px;border-radius:3px;}
   .slot .key{position:absolute;top:2px;left:4px;font-size:10px;color:#fff;text-shadow:0 0 3px #000;}
+  .slot .count{position:absolute;bottom:1px;right:3px;font-size:11px;font-weight:600;color:#fff;text-shadow:0 0 3px #000;}
   #overlay{position:fixed;inset:0;background:rgba(0,0,0,0.55);color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;z-index:20;cursor:pointer;}
   #overlay h1{font-size:2.4em;margin:0 0 10px;}
   #overlay p{max-width:520px;line-height:1.6;opacity:0.92;font-size:15px;}
@@ -23,6 +25,26 @@
   #overlay .small{margin-top:18px;font-size:12px;opacity:0.65;}
   #hud{position:fixed;top:10px;left:10px;color:#fff;font-size:12px;text-shadow:0 0 3px #000;z-index:10;line-height:1.5;background:rgba(0,0,0,0.25);padding:6px 10px;border-radius:6px;}
   #hint{position:fixed;bottom:80px;left:50%;transform:translateX(-50%);color:#fff;font-size:12px;text-shadow:0 0 3px #000;z-index:10;opacity:0.85;white-space:nowrap;}
+  #craftHint{position:fixed;bottom:80px;left:50%;transform:translateX(-50%);color:#fff;font-size:13px;font-weight:600;text-shadow:0 0 4px #000;z-index:11;opacity:0;transition:opacity 0.15s;pointer-events:none;background:rgba(0,0,0,0.4);padding:6px 12px;border-radius:6px;}
+  #craftHint.show{opacity:1;}
+  #craftingModal{position:fixed;inset:0;z-index:30;background:rgba(0,0,0,0.55);display:flex;align-items:center;justify-content:center;}
+  #craftingPanel{background:#2b2320;color:#f2e9d8;width:min(560px,92vw);max-height:82vh;overflow:auto;border-radius:10px;border:2px solid #5a4632;box-shadow:0 10px 40px rgba(0,0,0,0.5);}
+  #craftingHeader{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid #5a4632;position:sticky;top:0;background:#2b2320;}
+  #craftingHeader h2{margin:0;font-size:1.2em;}
+  #craftingClose{background:none;border:none;color:#f2e9d8;font-size:1.1em;cursor:pointer;padding:4px 10px;border-radius:6px;}
+  #craftingClose:hover{background:rgba(255,255,255,0.12);}
+  #craftingInventory{display:flex;flex-wrap:wrap;gap:8px;padding:14px 18px;border-bottom:1px solid #5a4632;}
+  .invItem{display:flex;align-items:center;gap:6px;background:rgba(255,255,255,0.06);border-radius:6px;padding:4px 9px;font-size:12px;}
+  .invItem .sw{width:14px;height:14px;border-radius:3px;flex:none;display:inline-block;}
+  #craftingRecipes{padding:14px 18px;display:flex;flex-direction:column;gap:10px;}
+  .recipe{display:flex;align-items:center;gap:12px;background:rgba(255,255,255,0.05);border-radius:8px;padding:10px 12px;}
+  .recipe .sw{width:34px;height:34px;border-radius:6px;flex:none;}
+  .recipe .info{flex:1;font-size:13px;line-height:1.5;}
+  .recipe .info b{display:block;font-size:14px;}
+  .recipe .need{opacity:0.7;font-size:12px;}
+  .recipe .need.short{color:#e58a6f;}
+  .recipe button{background:#5b8a3a;border:none;color:#fff;padding:8px 14px;border-radius:6px;cursor:pointer;font-size:13px;flex:none;}
+  .recipe button:disabled{background:#555;cursor:not-allowed;opacity:0.5;}
   [hidden]{display:none!important;}
 </style>
 </head>
@@ -30,17 +52,28 @@
 <div id="hud">Blocks edited: <span id="blockCount">0</span> &nbsp;|&nbsp; FPS: <span id="fps">0</span></div>
 <div id="crosshair"></div>
 <div id="hotbar"></div>
-<div id="hint">Left click: break &nbsp;·&nbsp; Right click: place &nbsp;·&nbsp; 1-8 / scroll: select block &nbsp;·&nbsp; Esc: release mouse</div>
+<div id="hint">Left click: break &nbsp;·&nbsp; Right click: place &nbsp;·&nbsp; 1-0 / scroll: select block &nbsp;·&nbsp; E: craft &nbsp;·&nbsp; Esc: release mouse</div>
+<div id="craftHint">Right-click the table (or press E) to craft</div>
+<div id="craftingModal" hidden>
+  <div id="craftingPanel">
+    <div id="craftingHeader">
+      <h2>Crafting Table</h2>
+      <button id="craftingClose" aria-label="Close">Close ✕</button>
+    </div>
+    <div id="craftingInventory"></div>
+    <div id="craftingRecipes"></div>
+  </div>
+</div>
 <div id="overlay">
   <h1>Blockcraft</h1>
   <p>
     A tiny Minecraft-inspired voxel sandbox that runs entirely in your browser.<br><br>
     <span class="key">WASD</span> move &nbsp; <span class="key">Space</span> jump &nbsp; <span class="key">Shift</span> sprint<br>
     <span class="key">Mouse</span> look &nbsp; <span class="key">Left click</span> break &nbsp; <span class="key">Right click</span> place<br>
-    <span class="key">1-8</span> select block
+    <span class="key">1-0</span> select block &nbsp; <span class="key">E</span> craft at table
   </p>
   <p><strong>Click anywhere to play</strong></p>
-  <p class="small">Best on desktop with a mouse. Your edits are saved automatically in this browser.</p>
+  <p class="small">Break blocks to gather materials, then place your Crafting Table and press E next to it to craft. Progress is saved automatically in this browser.</p>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
 <script src="main.js"></script>
