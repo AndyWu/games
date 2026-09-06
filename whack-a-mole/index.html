@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Animal Whack A Mole Game</title>
+<style>
+  :root {
+    --hole-color: #6b4423;
+    --hole-shadow: #3e2712;
+    --dirt: #8b5a2b;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; user-select: none; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    overflow: hidden;
+    touch-action: manipulation;
+    background: linear-gradient(#87ceeb, #b7e4c7);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  #app {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    max-width: 480px;
+    margin: 0 auto;
+    padding: env(safe-area-inset-top) 10px env(safe-area-inset-bottom);
+  }
+  header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 6px 4px;
+  }
+  #stats {
+    display: flex;
+    gap: 14px;
+    font-weight: 700;
+    font-size: 18px;
+    color: #234;
+  }
+  #stats span { min-width: 2.5em; display: inline-block; }
+  #legend {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 6px;
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 15px;
+    font-weight: 700;
+    padding: 3px 7px;
+    border-radius: 10px;
+  }
+  .legend-item .emojis { font-size: 17px; }
+  .legend-item.bonus { background: #dff5df; color: #2c7a2c; }
+  .legend-item.penalty { background: #fde0dd; color: #b23a2f; }
+  #board {
+    flex: 1;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    grid-template-rows: repeat(4, 1fr);
+    gap: 3vw;
+    padding: 3vw;
+    align-content: center;
+  }
+  .hole-wrap {
+    position: relative;
+    width: 100%;
+    height: 100%;
+  }
+  .hole {
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    background: radial-gradient(ellipse at center, var(--hole-shadow) 0%, var(--hole-color) 60%, var(--dirt) 100%);
+    box-shadow: inset 0 6px 10px rgba(0,0,0,0.6), 0 4px 4px rgba(0,0,0,0.15);
+    overflow: hidden;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    cursor: pointer;
+  }
+  .critter {
+    font-size: 0;
+    width: 78%;
+    height: 78%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transform: translateY(100%);
+    transition: transform 0.12s cubic-bezier(.34,1.56,.64,1);
+    filter: drop-shadow(0 3px 2px rgba(0,0,0,0.35));
+  }
+  .critter .emoji {
+    font-size: min(9vw, 8vh);
+    line-height: 1;
+  }
+  .hole.up .critter { transform: translateY(0%); }
+  .hole.whacked .critter {
+    transform: translateY(20%) scale(0.85) rotate(15deg);
+    filter: drop-shadow(0 1px 1px rgba(0,0,0,0.35)) brightness(1.3);
+  }
+  .hole.up::after {
+    content: "";
+  }
+  .bonk {
+    position: absolute;
+    font-size: 7vw;
+    font-weight: 800;
+    color: #2c7a2c;
+    text-shadow: -1px -1px 0 #fff, 1px -1px 0 #fff, -1px 1px 0 #fff, 1px 1px 0 #fff;
+    pointer-events: none;
+    animation: bonkPop 0.4s ease-out forwards;
+    z-index: 5;
+    top: 10%;
+  }
+  .bonk.negative { color: #b23a2f; }
+  @keyframes bonkPop {
+    0% { transform: scale(0.4) translateY(0); opacity: 1; }
+    100% { transform: scale(1.4) translateY(-30px); opacity: 0; }
+  }
+  #overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.55);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 20;
+  }
+  #overlay.hidden { display: none; }
+  .card {
+    background: #fffef6;
+    border-radius: 16px;
+    padding: 28px 24px;
+    text-align: center;
+    width: 82%;
+    max-width: 340px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+  }
+  .card h1 { margin: 0 0 6px; font-size: 26px; color: #234; }
+  .card p { margin: 4px 0 18px; color: #567; }
+  .rules-row {
+    display: flex;
+    justify-content: center;
+    gap: 10px;
+    margin-bottom: 20px;
+  }
+  .rules-row .legend-item { font-size: 17px; padding: 6px 10px; border-radius: 12px; }
+  .rules-row .legend-item .emojis { font-size: 22px; }
+  .big-btn {
+    font-size: 18px;
+    font-weight: 700;
+    padding: 12px 28px;
+    border: none;
+    border-radius: 30px;
+    background: #ff7043;
+    color: white;
+    cursor: pointer;
+    box-shadow: 0 4px 0 #c1502b;
+  }
+  .big-btn:active { box-shadow: 0 1px 0 #c1502b; transform: translateY(3px); }
+  #finalScore { font-size: 42px; font-weight: 800; color: #ff7043; margin: 6px 0 16px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div id="stats">
+      <span>⏱ <span id="time">30</span></span>
+      <span>⭐ <span id="score">0</span></span>
+    </div>
+    <div id="legend">
+      <span class="legend-item bonus"><span class="emojis">🦖🐊</span>+2</span>
+      <span class="legend-item penalty"><span class="emojis">🐶🐰🐱</span>−1</span>
+    </div>
+  </header>
+  <div id="board"></div>
+</div>
+
+<div id="overlay">
+  <div class="card" id="startCard">
+    <h1>Animal Whack A Mole Game</h1>
+    <p>Tap fast! Dinosaurs and crocodiles are worth points — dogs, rabbits, and cats cost you one.</p>
+    <div class="rules-row">
+      <span class="legend-item bonus"><span class="emojis">🦖🐊</span>+2</span>
+      <span class="legend-item penalty"><span class="emojis">🐶🐰🐱</span>−1</span>
+    </div>
+    <button class="big-btn" id="startBtn">Start Game</button>
+  </div>
+  <div class="card" id="endCard" style="display:none;">
+    <h1>Time's Up!</h1>
+    <div id="finalScore">0</div>
+    <button class="big-btn" id="restartBtn">Play Again</button>
+  </div>
+</div>
+
+<script>
+(function () {
+  const HOLE_COUNT = 12;
+  const GAME_SECONDS = 30;
+  const MAX_ACTIVE = 3;
+  const BONUS_ANIMALS = ['🦖', '🐊'];
+  const PENALTY_ANIMALS = ['🐶', '🐰', '🐱'];
+  const ALL_ANIMALS = [...BONUS_ANIMALS, ...PENALTY_ANIMALS];
+  const BONUS_SET = new Set(BONUS_ANIMALS);
+
+  const board = document.getElementById('board');
+  const scoreEl = document.getElementById('score');
+  const timeEl = document.getElementById('time');
+  const overlay = document.getElementById('overlay');
+  const startCard = document.getElementById('startCard');
+  const endCard = document.getElementById('endCard');
+  const finalScoreEl = document.getElementById('finalScore');
+  const startBtn = document.getElementById('startBtn');
+  const restartBtn = document.getElementById('restartBtn');
+
+  let score = 0;
+  let timeLeft = GAME_SECONDS;
+  let running = false;
+  let popTimer = null;
+  let tickTimer = null;
+  let activeCount = 0;
+
+  const holes = [];
+
+  for (let i = 0; i < HOLE_COUNT; i++) {
+    const wrap = document.createElement('div');
+    wrap.className = 'hole-wrap';
+    const hole = document.createElement('div');
+    hole.className = 'hole';
+    const critter = document.createElement('div');
+    critter.className = 'critter';
+    critter.innerHTML = '<span class="emoji"></span>';
+    hole.appendChild(critter);
+    wrap.appendChild(hole);
+    board.appendChild(wrap);
+    holes.push({ el: hole, critter, up: false, whacked: false, emoji: null });
+
+    hole.addEventListener('pointerdown', () => whack(holes[i]));
+  }
+
+  function hideHole(hole) {
+    clearTimeout(hole.hideTimeout);
+    if (hole.up) {
+      hole.up = false;
+      activeCount--;
+    }
+    hole.el.classList.remove('up', 'whacked');
+  }
+
+  function trySpawn() {
+    if (!running) return;
+    if (activeCount < MAX_ACTIVE) {
+      const empty = holes.filter(h => !h.up);
+      if (empty.length) spawn(empty[Math.floor(Math.random() * empty.length)]);
+    }
+    const gap = Math.max(220, 550 - score * 6) + Math.random() * 250;
+    popTimer = setTimeout(trySpawn, gap);
+  }
+
+  function spawn(hole) {
+    hole.up = true;
+    hole.whacked = false;
+    hole.emoji = ALL_ANIMALS[Math.floor(Math.random() * ALL_ANIMALS.length)];
+    hole.critter.querySelector('.emoji').textContent = hole.emoji;
+    activeCount++;
+    hole.el.classList.add('up');
+    hole.el.classList.remove('whacked');
+
+    const minUp = Math.max(420, 900 - score * 12);
+    const maxUp = Math.max(minUp + 200, 1400 - score * 15);
+    const upDuration = minUp + Math.random() * (maxUp - minUp);
+
+    hole.hideTimeout = setTimeout(() => hideHole(hole), upDuration);
+  }
+
+  function whack(hole) {
+    if (!running || !hole.up || hole.whacked) return;
+    hole.whacked = true;
+    hole.el.classList.add('whacked');
+
+    const isBonus = BONUS_SET.has(hole.emoji);
+    const delta = isBonus ? 2 : -1;
+    score += delta;
+    scoreEl.textContent = score;
+
+    const bonk = document.createElement('div');
+    bonk.className = 'bonk' + (isBonus ? '' : ' negative');
+    bonk.textContent = (delta > 0 ? '+' : '') + delta;
+    hole.el.appendChild(bonk);
+    setTimeout(() => bonk.remove(), 400);
+
+    clearTimeout(hole.hideTimeout);
+    hole.hideTimeout = setTimeout(() => hideHole(hole), 150);
+  }
+
+  function tick() {
+    timeLeft--;
+    timeEl.textContent = timeLeft;
+    if (timeLeft <= 0) {
+      endGame();
+    }
+  }
+
+  function startGame() {
+    score = 0;
+    timeLeft = GAME_SECONDS;
+    scoreEl.textContent = score;
+    timeEl.textContent = timeLeft;
+    running = true;
+    activeCount = 0;
+    holes.forEach(h => {
+      h.up = false;
+      h.whacked = false;
+      h.el.classList.remove('up', 'whacked');
+      clearTimeout(h.hideTimeout);
+    });
+    overlay.classList.add('hidden');
+    clearTimeout(popTimer);
+    clearInterval(tickTimer);
+    popTimer = setTimeout(trySpawn, 400);
+    tickTimer = setInterval(tick, 1000);
+  }
+
+  function endGame() {
+    running = false;
+    clearTimeout(popTimer);
+    clearInterval(tickTimer);
+    holes.forEach(h => {
+      h.up = false;
+      h.el.classList.remove('up');
+      clearTimeout(h.hideTimeout);
+    });
+    finalScoreEl.textContent = score;
+    startCard.style.display = 'none';
+    endCard.style.display = 'block';
+    overlay.classList.remove('hidden');
+  }
+
+  startBtn.addEventListener('click', () => {
+    startCard.style.display = 'block';
+    endCard.style.display = 'none';
+    startGame();
+  });
+
+  restartBtn.addEventListener('click', () => {
+    startCard.style.display = 'none';
+    endCard.style.display = 'none';
+    startGame();
+  });
+
+  document.addEventListener('contextmenu', (e) => e.preventDefault());
+})();
+</script>
+</body>
+</html>
