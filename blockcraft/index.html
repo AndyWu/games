@@ -49,7 +49,7 @@
 </style>
 </head>
 <body>
-<div id="hud">Blocks edited: <span id="blockCount">0</span> &nbsp;|&nbsp; FPS: <span id="fps">0</span></div>
+<div id="hud">Blocks edited: <span id="blockCount">0</span> &nbsp;|&nbsp; FPS: <span id="fps">0</span> &nbsp;|&nbsp; Players: <span id="playerCount">1</span> &nbsp;|&nbsp; <span id="mpStatus">Connecting…</span></div>
 <div id="crosshair"></div>
 <div id="hotbar"></div>
 <div id="hint">Left click: break &nbsp;·&nbsp; Right click: place &nbsp;·&nbsp; 1-0 / scroll: select block &nbsp;·&nbsp; E: craft &nbsp;·&nbsp; V: 3rd person &nbsp;·&nbsp; Esc: release mouse</div>
@@ -76,6 +76,9 @@
   <p class="small">Break blocks to gather materials, then place your Crafting Table and press E next to it to craft. Progress is saved automatically in this browser.</p>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-database-compat.js"></script>
+<script src="firebase-config.js"></script>
 <script src="main.js"></script>
 </body>
 </html>

@@ -1,6 +1,6 @@
 # Blockcraft
 
-A tiny Minecraft-inspired voxel sandbox that runs entirely in the browser — procedurally generated terrain, block breaking/placing, and first-person movement, built with [three.js](https://threejs.org/). No build step, no server-side code, no dependencies to install.
+A tiny Minecraft-inspired voxel sandbox that runs entirely in the browser — procedurally generated terrain, block breaking/placing, crafting, and shared multiplayer, built with [three.js](https://threejs.org/). No build step, no server-side code, no dependencies to install (multiplayer sync uses a free Firebase project — see below).
 
 ## Play locally
 
@@ -15,10 +15,10 @@ Then visit `http://localhost:8000`.
 ## Deploy to GitHub Pages
 
 1. Create a new GitHub repository (public).
-2. Push this folder's contents (`index.html`, `main.js`) to the repo's default branch:
+2. Push this folder's contents (`index.html`, `main.js`, `firebase-config.js`) to the repo's default branch:
    ```bash
    git init
-   git add index.html main.js README.md
+   git add index.html main.js firebase-config.js README.md
    git commit -m "Add Blockcraft voxel game"
    git branch -M main
    git remote add origin https://github.com/<your-username>/<your-repo>.git
@@ -40,6 +40,7 @@ Then visit `http://localhost:8000`.
 - Right click — place block (or open the crafting menu if you're looking at a Crafting Table)
 - `1`–`0` or mouse wheel — select block from hotbar
 - `E` — open/close crafting when standing near a Crafting Table
+- `V` — toggle third-person camera (see your own blocky character)
 
 ## Crafting
 
@@ -51,6 +52,28 @@ Blocks you break go into your inventory (shown as counts on the hotbar), and pla
 - 4 Stone → 4 Bricks
 
 The Craft button lights up once you have enough materials. Your inventory (like your world edits) is saved to `localStorage`, so it persists across reloads.
+
+## Multiplayer
+
+Everyone who loads the page connects to the same shared world via [Firebase Realtime Database](https://firebase.google.com/docs/database) — block edits and player positions sync live between everyone currently online. GitHub Pages only serves static files, so it can't run a multiplayer server itself; Firebase's free tier fills that role instead, and the client just talks to it directly over a WebSocket.
+
+To point the game at your own Firebase project:
+
+1. Create a free project at [console.firebase.google.com](https://console.firebase.google.com).
+2. Go to **Build → Realtime Database → Create Database**.
+3. Add a **Web app** to the project (the `</>` icon in Project Settings) and copy the `firebaseConfig` snippet it gives you into `firebase-config.js` in this folder (there's a template there already).
+4. In **Realtime Database → Rules**, paste:
+   ```json
+   {
+     "rules": {
+       "players": { ".read": true, ".write": true },
+       "world": { ".read": true, ".write": true }
+     }
+   }
+   ```
+   This keeps the world open to read/write for anyone with the URL — fine for a hobby project among friends, but note there's no auth, so anyone could in principle edit the world or spoof a player. Test-mode's default rules expire after 30 days; these don't.
+
+If you don't want multiplayer at all, delete `firebase-config.js` and its `<script>` tag in `index.html` — the game detects the missing config and falls back to solo mode automatically (with everything saved to local `localStorage` instead).
 
 ## Notes
 

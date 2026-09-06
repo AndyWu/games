@@ -537,11 +537,11 @@ function spawnPlayer(){
   player.vel.set(0,0,0);
 }
 
-// ---------- Blocky character model (the player's own body; reusable for other players later) ----------
-function createCharacterMesh(){
+// ---------- Blocky character model (the player's own body, and other connected players) ----------
+function createCharacterMesh(shirtColor){
   const group = new THREE.Group();
   const skinMat = new THREE.MeshLambertMaterial({ color: 0xd9a066 });
-  const shirtMat = new THREE.MeshLambertMaterial({ color: 0x3b6ea5 });
+  const shirtMat = new THREE.MeshLambertMaterial({ color: shirtColor!==undefined ? shirtColor : 0x3b6ea5 });
   const pantsMat = new THREE.MeshLambertMaterial({ color: 0x3a3a3a });
 
   function box(w,h,d,mat,pivotTop){
@@ -567,20 +567,137 @@ function createCharacterMesh(){
   group.userData.parts = { armL, armR, legL, legR };
   return group;
 }
-let thirdPerson = false;
-let characterMesh;
-let walkPhase = 0, walkAmp = 0;
-function updateCharacterAnim(dt, moving, sprinting){
-  walkAmp += ((moving?1:0) - walkAmp) * Math.min(1, dt*8);
-  walkPhase += dt * (sprinting ? 11 : 7);
-  const swing = Math.sin(walkPhase) * 0.6 * walkAmp;
-  const { armL, armR, legL, legR } = characterMesh.userData.parts;
+function animateWalk(group, state, dt, moving, sprinting){
+  state.amp += ((moving?1:0) - state.amp) * Math.min(1, dt*8);
+  state.phase += dt * (sprinting ? 11 : 7);
+  const swing = Math.sin(state.phase) * 0.6 * state.amp;
+  const { armL, armR, legL, legR } = group.userData.parts;
   armR.rotation.x = swing;
   legL.rotation.x = swing;
   armL.rotation.x = -swing;
   legR.rotation.x = -swing;
+}
+function colorForId(id){
+  let h=0;
+  for(let i=0;i<id.length;i++) h = (h*31 + id.charCodeAt(i)) >>> 0;
+  return new THREE.Color(`hsl(${h%360},60%,55%)`).getHex();
+}
+
+let thirdPerson = false;
+let characterMesh;
+const myWalkState = { phase:0, amp:0 };
+function updateCharacterAnim(dt, moving, sprinting){
+  animateWalk(characterMesh, myWalkState, dt, moving, sprinting);
   characterMesh.position.set(player.pos.x, player.pos.y, player.pos.z);
   characterMesh.rotation.y = player.yaw;
+}
+
+// ---------- Multiplayer (Firebase Realtime Database) ----------
+let fbReady = false, db = null, myId = null;
+const remotePlayers = new Map();
+function shortestAngleLerp(from, to, t){
+  let d = to - from;
+  d = Math.atan2(Math.sin(d), Math.cos(d));
+  return from + d*t;
+}
+function addRemotePlayer(id, data){
+  const mesh = createCharacterMesh(colorForId(id));
+  mesh.position.set(data.x||0, data.y||0, data.z||0);
+  mesh.rotation.y = data.yaw||0;
+  scene.add(mesh);
+  remotePlayers.set(id, { mesh, target:{x:data.x||0,y:data.y||0,z:data.z||0,yaw:data.yaw||0}, walk:{phase:0,amp:0} });
+  document.getElementById('playerCount').textContent = remotePlayers.size+1;
+}
+function updateRemotePlayer(id, data){
+  const e = remotePlayers.get(id);
+  if(!e) return addRemotePlayer(id, data);
+  e.target.x = data.x||0; e.target.y = data.y||0; e.target.z = data.z||0; e.target.yaw = data.yaw||0;
+}
+function removeRemotePlayer(id){
+  const e = remotePlayers.get(id);
+  if(!e) return;
+  scene.remove(e.mesh);
+  remotePlayers.delete(id);
+  document.getElementById('playerCount').textContent = remotePlayers.size+1;
+}
+function updateRemotePlayers(dt){
+  remotePlayers.forEach(e=>{
+    const dist = Math.hypot(e.target.x-e.mesh.position.x, e.target.y-e.mesh.position.y, e.target.z-e.mesh.position.z);
+    const moving = dist > 0.03;
+    const t = Math.min(1, dt*10);
+    e.mesh.position.x += (e.target.x - e.mesh.position.x)*t;
+    e.mesh.position.y += (e.target.y - e.mesh.position.y)*t;
+    e.mesh.position.z += (e.target.z - e.mesh.position.z)*t;
+    e.mesh.rotation.y = shortestAngleLerp(e.mesh.rotation.y, e.target.yaw, t);
+    animateWalk(e.mesh, e.walk, dt, moving, false);
+  });
+}
+function applyWorldEdit(x,y,z,val,fromRemote){
+  if(getBlock(x,y,z)===val) return;
+  setBlock(x,y,z,val);
+  const k = x+','+y+','+z;
+  edits.set(k, val);
+  if(val===CRAFTING_TABLE) craftingTables.add(k); else craftingTables.delete(k);
+  onBlockChanged(x,y,z);
+  saveEdits();
+  if(!fromRemote && fbReady) db.ref('world/edits/'+k).set(val);
+}
+let lastBroadcast = 0;
+function broadcastPosition(now){
+  if(!fbReady) return;
+  if(now - lastBroadcast < 100) return;
+  lastBroadcast = now;
+  db.ref('players/'+myId).set({
+    x: Math.round(player.pos.x*100)/100,
+    y: Math.round(player.pos.y*100)/100,
+    z: Math.round(player.pos.z*100)/100,
+    yaw: Math.round(player.yaw*100)/100,
+    t: firebase.database.ServerValue.TIMESTAMP,
+  });
+}
+function initMultiplayer(){
+  if(typeof firebase==='undefined' || typeof FIREBASE_CONFIG==='undefined') return;
+  try{
+    firebase.initializeApp(FIREBASE_CONFIG);
+    db = firebase.database();
+
+    myId = localStorage.getItem('blockcraft_player_id');
+    if(!myId){
+      myId = (crypto.randomUUID ? crypto.randomUUID() : 'p'+Math.random().toString(36).slice(2));
+      localStorage.setItem('blockcraft_player_id', myId);
+    }
+
+    const myRef = db.ref('players/'+myId);
+    myRef.onDisconnect().remove();
+
+    db.ref('world/edits').on('child_added', snap=>{
+      const [x,y,z] = snap.key.split(',').map(Number);
+      applyWorldEdit(x,y,z,snap.val(),true);
+    });
+    db.ref('world/edits').on('child_changed', snap=>{
+      const [x,y,z] = snap.key.split(',').map(Number);
+      applyWorldEdit(x,y,z,snap.val(),true);
+    });
+
+    db.ref('players').on('child_added', snap=>{
+      if(snap.key===myId) return;
+      addRemotePlayer(snap.key, snap.val());
+    });
+    db.ref('players').on('child_changed', snap=>{
+      if(snap.key===myId) return;
+      updateRemotePlayer(snap.key, snap.val());
+    });
+    db.ref('players').on('child_removed', snap=>{
+      removeRemotePlayer(snap.key);
+    });
+
+    document.getElementById('mpStatus').textContent = 'Online';
+    fbReady = true;
+  }catch(e){
+    console.warn('Multiplayer unavailable, playing solo:', e);
+    document.getElementById('mpStatus').textContent = 'Offline (solo)';
+    fbReady = false;
+  }
 }
 
 // ---------- First-person view-model (arm + held block, rendered as a separate overlay pass) ----------
@@ -704,14 +821,9 @@ function breakBlock(){
   if(!hit) return;
   const b = getBlock(hit.x,hit.y,hit.z);
   if(b===BEDROCK) return;
-  setBlock(hit.x,hit.y,hit.z,AIR);
-  const k = hit.x+','+hit.y+','+hit.z;
-  edits.set(k, AIR);
-  craftingTables.delete(k);
+  applyWorldEdit(hit.x, hit.y, hit.z, AIR, false);
   if(COLLECTIBLE.has(b)){ invAdd(b,1); saveInventory(); }
-  onBlockChanged(hit.x,hit.y,hit.z);
   updateHotbarUI();
-  saveEdits();
   triggerSwing();
 }
 function placeBlock(){
@@ -725,15 +837,10 @@ function placeBlock(){
   const px=player.pos.x, py=player.pos.y, pz=player.pos.z;
   const overlapsPlayer = (x+1>px-w && x<px+w && z+1>pz-w && z<pz+w && y<py+player.height && y+1>py);
   if(overlapsPlayer) return;
-  setBlock(x,y,z, block);
-  const k = x+','+y+','+z;
-  edits.set(k, block);
-  if(block===CRAFTING_TABLE) craftingTables.add(k);
+  applyWorldEdit(x, y, z, block, false);
   invSub(block,1);
   saveInventory();
-  onBlockChanged(x,y,z);
   updateHotbarUI();
-  saveEdits();
   triggerSwing();
 }
 
@@ -899,6 +1006,7 @@ function init(){
   spawnPlayer();
   updateHotbarUI();
   updateHeldItemColor();
+  initMultiplayer();
 
   window.addEventListener('resize', ()=>{
     camera.aspect = window.innerWidth/window.innerHeight;
@@ -924,6 +1032,8 @@ function animate(now){
   const sprinting = !!(keys['ShiftLeft']||keys['ShiftRight']);
   updateCharacterAnim(dt, moving, sprinting);
   updateHandView(dt, moving, sprinting);
+  updateRemotePlayers(dt);
+  broadcastPosition(now);
 
   if(thirdPerson){
     characterMesh.visible = true;
