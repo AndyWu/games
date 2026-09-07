@@ -8,7 +8,7 @@ const WORLD_SIZE = 128;     // x/z extent (4x the original 64x64 area, same gene
 const WORLD_HEIGHT = 48;    // y extent
 const CHUNK_SIZE = 16;
 const CHUNKS_PER_SIDE = WORLD_SIZE / CHUNK_SIZE;
-const SEA_LEVEL = 15;
+const SEA_LEVEL = 16; // flooded 1 block higher than the original 15
 const BASE_HEIGHT = 20;
 const AMPLITUDE = 9;
 const SEED = 1337;
@@ -2609,12 +2609,20 @@ function playerOverlapsCell(x,y,z){
 function placeDoor(hit){
   const {x,y,z} = hit.prev;
   if(invCount(DOOR)<=0) return;
-  const dx = hit.prev.x - hit.x, dz = hit.prev.z - hit.z;
-  const axis = dx!==0 ? 'z' : 'x';
+  // Orientation is driven by which way the player is actually looking (yaw), not by which exact
+  // face the raycast happened to hit — the old face-normal approach could pick a different axis
+  // depending on subtle aim differences even when the player felt like they were facing the same
+  // way, which read as "random." Facing more along X/Z decides the door's width axis (perpendicular
+  // to your view, like something you'd walk through), and it always extends toward your right hand
+  // from the cell you targeted, so the same aim always produces the same door.
+  const fx = -Math.sin(player.yaw), fz = -Math.cos(player.yaw);
+  const axis = Math.abs(fx) > Math.abs(fz) ? 'z' : 'x';
+  const rx = Math.cos(player.yaw), rz = -Math.sin(player.yaw);
+  const widthDir = (axis==='x' ? rx : rz) >= 0 ? 1 : -1;
   const cells = [];
   for(let dy=0; dy<3; dy++)
     for(let w=0; w<2; w++)
-      cells.push({ x: axis==='x'?x+w:x, y: y+dy, z: axis==='z'?z+w:z });
+      cells.push({ x: axis==='x'?x+w*widthDir:x, y: y+dy, z: axis==='z'?z+w*widthDir:z });
   for(const c of cells){
     if(getBlock(c.x,c.y,c.z)!==AIR) return;
     if(playerOverlapsCell(c.x,c.y,c.z)) return;
@@ -3086,6 +3094,9 @@ function animate(now){
   }
 
   craftHint.classList.toggle('show', locked && !craftingOpen && nearestCraftingTable(4));
+
+  const coordsEl = document.getElementById('coordsLabel');
+  if(coordsEl) coordsEl.textContent = `${player.pos.x.toFixed(1)}, ${player.pos.y.toFixed(1)}, ${player.pos.z.toFixed(1)}`;
 
   fpsTimer += dt; fpsCount++;
   if(fpsTimer>=0.5){
