@@ -647,8 +647,11 @@ function generateWorld(){
 // plantBush use a raw setBlock (fast, unsynced — fine for deterministic world-gen), the *Synced
 // variants route through applyWorldEdit so a sapling maturing at runtime is persisted/synced/
 // rendered like any other edit.
+const TALL_TREE_CHANCE = 0.05; // fraction of trees that grow to 5x their normal height
 function plantTreeCells(x,y,z,writeFn){
-  const height = 4 + Math.floor(hash2(x+1,z+1)*3);
+  const baseHeight = 4 + Math.floor(hash2(x+1,z+1)*3);
+  const isTall = hash2(x+13,z+29) < TALL_TREE_CHANCE;
+  const height = isTall ? baseHeight*5 : baseHeight;
   for(let i=0;i<height;i++) writeFn(x,y+i,z,WOOD,true);
   const top = y+height;
   for(let dy=-2;dy<=1;dy++){
