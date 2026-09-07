@@ -303,13 +303,22 @@ function drawLogTop(ctx,x0,y0){
   ctx.fillRect(x0,y0,2,TILE); ctx.fillRect(x0+TILE-2,y0,2,TILE);
 }
 function drawLeaves(ctx,x0,y0){
-  fillTile(ctx,x0,y0,0x3f7d34);
-  for(let i=0;i<10;i++) blob(ctx, x0+Math.random()*TILE, y0+Math.random()*TILE, TILE*0.2, 0x3f7d34, 24);
-  speckle(ctx,x0,y0,0x3f7d34,Math.round(TILE*TILE*0.3),26);
-  for(let i=0;i<TILE*0.3;i++){
-    const px=x0+Math.floor(Math.random()*TILE), py=y0+Math.floor(Math.random()*TILE);
-    ctx.fillStyle = shadeStr(0x24401f,1,6);
-    ctx.fillRect(px,py,1,1);
+  // No base fill — the tile starts fully transparent, so the gaps between leaf clumps are genuine
+  // see-through holes (LEAVES is in TRANSPARENT_BLOCKS/the glass bucket) rather than a solid green
+  // cube with leaf-colored speckle painted on top of it.
+  const clumps = 34;
+  for(let i=0;i<clumps;i++){
+    const cx = x0+Math.random()*TILE, cy = y0+Math.random()*TILE;
+    const r = TILE*(0.12+Math.random()*0.12);
+    const n = Math.max(6, Math.round(r*r*1.1));
+    for(let j=0;j<n;j++){
+      const ang = Math.random()*Math.PI*2, rad = Math.random()*r;
+      const px = Math.round(cx+Math.cos(ang)*rad), py = Math.round(cy+Math.sin(ang)*rad);
+      if(px<x0||px>=x0+TILE||py<y0||py>=y0+TILE) continue;
+      const dark = Math.random()<0.25;
+      ctx.fillStyle = shadeStr(dark?0x24401f:0x3f7d34, 0.85+Math.random()*0.4, 20);
+      ctx.fillRect(px,py,1,1);
+    }
   }
 }
 function drawPlanks(ctx,x0,y0){
@@ -785,9 +794,14 @@ const waterMaterial = new THREE.MeshLambertMaterial({ vertexColors: true, side: 
 // material so their own texture supplies the color, unlike water's blue-tinted one.
 const glassMaterial = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide, map: atlasTexture, transparent:true, opacity:0.65 });
 // Any block that isn't fully opaque. A face between two blocks of the SAME transparent type is
-// skipped (no point rendering the seam between two adjacent water or window blocks); a face against
-// a *different* transparent type, or against AIR, still draws.
-const TRANSPARENT_BLOCKS = new Set([WATER, WINDOW, WINDOW_OPEN, DOOR_OPEN, SAPLING, FIRE, TORCH, LADDER]);
+// skipped (no point rendering the seam between two adjacent water, window, or leaf blocks); a face
+// against a *different* transparent type, or against AIR, still draws.
+const TRANSPARENT_BLOCKS = new Set([WATER, WINDOW, WINDOW_OPEN, DOOR_OPEN, SAPLING, FIRE, TORCH, LADDER, LEAVES]);
+// The subset of the above that a "is this column covered by a roof" check treats as passing sky/
+// light straight through. Leaves are deliberately left out — a tree's canopy still counts as real
+// shelter/shade (indoor darkening, temperature danger) even though it now renders sparse and
+// translucent rather than as a solid cube.
+const SKY_PASS_BLOCKS = new Set([WATER, WINDOW, WINDOW_OPEN, DOOR_OPEN, SAPLING, FIRE, TORCH, LADDER]);
 function bucketFor(b){ return b===WATER ? 'water' : (TRANSPARENT_BLOCKS.has(b) ? 'glass' : 'solid'); }
 
 // Blocks with a clear vertical path up to the sky get full outdoor light; anything with a solid
@@ -802,7 +816,7 @@ function computeSkyExposure(x,z){
   for(let y=WORLD_HEIGHT-1; y>=0; y--){
     exposed[y] = blocked ? 0 : 1;
     const b = getBlock(x,y,z);
-    if(b!==AIR && !TRANSPARENT_BLOCKS.has(b)) blocked = true;
+    if(b!==AIR && !SKY_PASS_BLOCKS.has(b)) blocked = true;
   }
   return exposed;
 }
@@ -2188,7 +2202,7 @@ function isPositionSkyExposed(x,y,z){
   const bx=Math.floor(x), bz=Math.floor(z);
   for(let cy=Math.floor(y)+1; cy<WORLD_HEIGHT; cy++){
     const b = getBlock(bx,cy,bz);
-    if(b!==AIR && !TRANSPARENT_BLOCKS.has(b)) return false;
+    if(b!==AIR && !SKY_PASS_BLOCKS.has(b)) return false;
   }
   return true;
 }
