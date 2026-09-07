@@ -2024,11 +2024,13 @@ const WEATHER_PERIOD_S = 1200;     // how long one weather episode lasts (20 min
 const WEATHER_TRANSITION_S = 90;   // how long it takes to blend into a freshly-rolled episode (1.5 min)
 const WEATHER_TYPES = [
   // cumulative selection order matters only in that it's applied consistently; percentages per the spec
-  { id:'sunny',        p:0.50, fogMul:1.00, darken:0.00, rain:0.0,  thunder:false, label:'Sunny' },
-  { id:'cloudy',       p:0.15, fogMul:0.80, darken:0.28, rain:0.0,  thunder:false, label:'Cloudy' },
-  { id:'rainy',        p:0.20, fogMul:0.55, darken:0.42, rain:0.5,  thunder:false, label:'Rainy' },
-  { id:'rainstorm',    p:0.10, fogMul:0.40, darken:0.55, rain:1.0,  thunder:false, label:'Rainstorm' },
-  { id:'thunderstorm', p:0.05, fogMul:0.30, darken:0.68, rain:1.5,  thunder:true,  label:'Heavy Thunderstorm' },
+  // chillF: how many degrees this weather knocks off the temperature (see currentTemperatureF) —
+  // wetter/stormier weather runs colder, on top of whatever season/time-of-day already has it at.
+  { id:'sunny',        p:0.50, fogMul:1.00, darken:0.00, rain:0.0,  thunder:false, chillF:0,  label:'Sunny' },
+  { id:'cloudy',       p:0.15, fogMul:0.80, darken:0.28, rain:0.0,  thunder:false, chillF:2,  label:'Cloudy' },
+  { id:'rainy',        p:0.20, fogMul:0.55, darken:0.42, rain:0.5,  thunder:false, chillF:6,  label:'Rainy' },
+  { id:'rainstorm',    p:0.10, fogMul:0.40, darken:0.55, rain:1.0,  thunder:false, chillF:10, label:'Rainstorm' },
+  { id:'thunderstorm', p:0.05, fogMul:0.30, darken:0.68, rain:1.5,  thunder:true,  chillF:14, label:'Heavy Thunderstorm' },
 ];
 function weatherHash(n){
   const s = Math.sin(n*12.9898 + SEED*0.0007)*43758.5453123;
@@ -2091,7 +2093,9 @@ function currentTemperatureF(){
   const dayTime = currentDayTime();
   const dailyOffset = DAILY_TEMP_SWING_F * Math.cos((dayTime-0.5)*Math.PI*2);
   const noise = (smoothNoise01(t*0.05, 91)*2-1) * 4;
-  return avgF + dailyOffset + noise;
+  const wb = currentWeatherBlend();
+  const chillF = lerp(wb.from.chillF, wb.to.chillF, wb.lt);
+  return avgF + dailyOffset + noise - chillF;
 }
 // Straight-up sky check from an arbitrary live position (the player), as opposed to
 // computeSkyExposure() which is baked per-column into chunk mesh vertex colors at build time.
