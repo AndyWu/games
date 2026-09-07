@@ -159,11 +159,11 @@ function nearestCraftingTable(maxDist){
 // ---------- Texture atlas (procedurally drawn pixel-art, no external image assets) ----------
 // TILE=32 (was 16) gives 4x the pixel budget per block face — enough room for real structure
 // (cracks, grain, brick-by-brick variation, ripples) rather than flat color + noise.
-const TILE = 32, ATLAS_COLS = 4, ATLAS_ROWS = 6;
+const TILE = 32, ATLAS_COLS = 4, ATLAS_ROWS = 7;
 const T_GRASS_TOP=0, T_GRASS_SIDE=1, T_DIRT=2, T_STONE=3, T_SAND=4, T_LOG_SIDE=5, T_LOG_TOP=6,
       T_LEAVES=7, T_PLANKS=8, T_BEDROCK=9, T_CRAFT_TOP=10, T_CRAFT_SIDE=11, T_BRICKS=12, T_WATER=13,
       T_WINDOW=14, T_WINDOW_OPEN=15, T_DOOR=16, T_DOOR_OPEN=17, T_SAPLING=18, T_FLINT=19, T_FIRE=20,
-      T_TORCH=21, T_LADDER=22;
+      T_TORCH=21, T_LADDER=22, T_LEAVES_SPARSE=23, T_LEAVES_DENSE=24;
 
 function hexRGB(hex){ return [(hex>>16)&255, (hex>>8)&255, hex&255]; }
 function rgbStr(r,g,b){ return `rgb(${r|0},${g|0},${b|0})`; }
@@ -302,11 +302,11 @@ function drawLogTop(ctx,x0,y0){
   ctx.fillRect(x0,y0,TILE,2); ctx.fillRect(x0,y0+TILE-2,TILE,2);
   ctx.fillRect(x0,y0,2,TILE); ctx.fillRect(x0+TILE-2,y0,2,TILE);
 }
-function drawLeaves(ctx,x0,y0){
-  // No base fill — the tile starts fully transparent, so the gaps between leaf clumps are genuine
-  // see-through holes (LEAVES is in TRANSPARENT_BLOCKS/the glass bucket) rather than a solid green
-  // cube with leaf-colored speckle painted on top of it.
-  const clumps = 34;
+// No base fill — the tile starts fully transparent, so the gaps between leaf clumps are genuine
+// see-through holes (LEAVES is in TRANSPARENT_BLOCKS/the glass bucket) rather than a solid green
+// cube with leaf-colored speckle painted on top of it. Shared by the three density tiers below
+// (T_LEAVES/T_LEAVES_SPARSE/T_LEAVES_DENSE) — same clump technique, just more or fewer of them.
+function drawLeavesDensity(ctx,x0,y0,clumps){
   for(let i=0;i<clumps;i++){
     const cx = x0+Math.random()*TILE, cy = y0+Math.random()*TILE;
     const r = TILE*(0.12+Math.random()*0.12);
@@ -321,6 +321,9 @@ function drawLeaves(ctx,x0,y0){
     }
   }
 }
+function drawLeavesSparse(ctx,x0,y0){ drawLeavesDensity(ctx,x0,y0,34); } // ~58% coverage — willow, birch
+function drawLeaves(ctx,x0,y0){ drawLeavesDensity(ctx,x0,y0,72); }       // ~80% (half the old gap) — oak, maple, apple
+function drawLeavesDense(ctx,x0,y0){ drawLeavesDensity(ctx,x0,y0,90); }  // ~91% — pine, redwood
 function drawPlanks(ctx,x0,y0){
   fillTile(ctx,x0,y0,0xb8894f);
   const boardH = TILE/4;
@@ -531,7 +534,7 @@ function buildAtlas(){
   const draw = [drawGrassTop, drawGrassSide, drawDirt, drawStone, drawSand, drawLogSide, drawLogTop,
                 drawLeaves, drawPlanks, drawBedrock, drawCraftTop, drawCraftSide, drawBricks, drawWater,
                 drawWindow, drawWindowOpen, drawDoor, drawDoorOpen, drawSapling, drawFlint, drawFire, drawTorch,
-                drawLadder];
+                drawLadder, drawLeavesSparse, drawLeavesDense];
   draw.forEach((fn, i)=> fn(ctx, (i%ATLAS_COLS)*TILE, Math.floor(i/ATLAS_COLS)*TILE));
   const tex = new THREE.CanvasTexture(canvas);
   tex.magFilter = THREE.NearestFilter;
@@ -825,15 +828,17 @@ function computeSkyExposure(x,z){
 // plain Wood/Leaves items, no new resource types — but each tree's trunk+canopy is tinted per a
 // species picked deterministically from its trunk's own (x,z), the same "no extra state to save"
 // trick day/night/weather/seasons already use. mul values are RGB multipliers applied on top of the
-// existing per-face lighting shade, not new textures. index 0 (untinted, [1,1,1]) is oak.
+// existing per-face lighting shade, not new textures. index 0 (untinted, [1,1,1]) is oak. leafTile
+// picks which of the three leaf-density atlas tiles (T_LEAVES/_SPARSE/_DENSE) that species uses —
+// evergreens read fuller, a willow's canopy reads wispier, same trick as the color tint.
 const TREE_SPECIES = [
-  { id:'oak',     leafMul:[1,1,1],           woodMul:[1,1,1] },
-  { id:'pine',    leafMul:[0.55,0.85,0.60],  woodMul:[0.85,0.72,0.68] },
-  { id:'birch',   leafMul:[1.10,1.25,0.55],  woodMul:[1.65,1.60,1.40] },
-  { id:'willow',  leafMul:[0.85,1.15,0.75],  woodMul:[1.05,0.95,0.80] },
-  { id:'maple',   leafMul:[1.55,0.55,0.35],  woodMul:[0.95,0.88,0.82] },
-  { id:'redwood', leafMul:[0.55,0.82,0.58],  woodMul:[1.15,0.50,0.42] },
-  { id:'apple',   leafMul:[0.95,1.12,0.62],  woodMul:[1,1,1], fruitMul:[1.6,0.25,0.22] },
+  { id:'oak',     leafMul:[1,1,1],           woodMul:[1,1,1],                                  leafTile:T_LEAVES },
+  { id:'pine',    leafMul:[0.55,0.85,0.60],  woodMul:[0.85,0.72,0.68],                          leafTile:T_LEAVES_DENSE },
+  { id:'birch',   leafMul:[1.10,1.25,0.55],  woodMul:[1.65,1.60,1.40],                          leafTile:T_LEAVES_SPARSE },
+  { id:'willow',  leafMul:[0.85,1.15,0.75],  woodMul:[1.05,0.95,0.80],                          leafTile:T_LEAVES_SPARSE },
+  { id:'maple',   leafMul:[1.55,0.55,0.35],  woodMul:[0.95,0.88,0.82],                          leafTile:T_LEAVES },
+  { id:'redwood', leafMul:[0.55,0.82,0.58],  woodMul:[1.15,0.50,0.42],                          leafTile:T_LEAVES_DENSE },
+  { id:'apple',   leafMul:[0.95,1.12,0.62],  woodMul:[1,1,1], fruitMul:[1.6,0.25,0.22],          leafTile:T_LEAVES },
 ];
 function speciesIndexForRoot(x,z){ return Math.floor(hash2(x+41,z+67)*TREE_SPECIES.length) % TREE_SPECIES.length; }
 // Bounded look for canopy near a wood run's top — gates tinting to things that actually look like a
@@ -883,13 +888,13 @@ function findTrunkColumnNear(x,y,z){
 function treeTintAt(b,x,y,z,columnSpecies){
   if(b===WOOD){
     const sIdx = columnSpecies[y];
-    return sIdx>0 ? TREE_SPECIES[sIdx-1].woodMul : null;
+    return sIdx>0 ? { mul: TREE_SPECIES[sIdx-1].woodMul, leafTile:null } : null;
   }
   const trunk = findTrunkColumnNear(x,y,z);
   if(!trunk) return null;
   const species = TREE_SPECIES[speciesIndexForRoot(trunk.x,trunk.z)];
-  if(species.fruitMul && hash2(x*7+y*13+3, z*11+y*17+5) < 0.12) return species.fruitMul;
-  return species.leafMul;
+  const mul = (species.fruitMul && hash2(x*7+y*13+3, z*11+y*17+5) < 0.12) ? species.fruitMul : species.leafMul;
+  return { mul, leafTile: species.leafTile };
 }
 function buildChunkGeometries(cx,cz){
   const buckets = {
@@ -921,7 +926,8 @@ function buildChunkGeometries(cx,cz){
           else draw = false;
           if(!draw) continue;
           const shadeF = (f.n[1]===1 ? 1.0 : (f.n[1]===-1 ? 0.5 : 0.75)) * indoorF;
-          const tileIdx = f.n[1]===1 ? tiles.top : (f.n[1]===-1 ? tiles.bottom : tiles.side);
+          const tileIdx = (tint && tint.leafTile!=null) ? tint.leafTile
+            : (f.n[1]===1 ? tiles.top : (f.n[1]===-1 ? tiles.bottom : tiles.side));
           const {u0,u1,vBottom,vTop} = tileUV(tileIdx);
           const pattern = UV_PATTERNS[fi];
           const base = bucket.positions.length/3;
@@ -929,7 +935,7 @@ function buildChunkGeometries(cx,cz){
             const c = f.c[ci];
             bucket.positions.push(x+c[0], y+c[1], z+c[2]);
             bucket.normals.push(f.n[0],f.n[1],f.n[2]);
-            if(tint) bucket.colors.push(shadeF*tint[0], shadeF*tint[1], shadeF*tint[2]);
+            if(tint) bucket.colors.push(shadeF*tint.mul[0], shadeF*tint.mul[1], shadeF*tint.mul[2]);
             else bucket.colors.push(shadeF,shadeF,shadeF);
             const [uf,vf] = pattern[ci];
             bucket.uvs.push(uf?u1:u0, vf?vTop:vBottom);
