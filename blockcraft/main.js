@@ -850,6 +850,77 @@ function onBlockChanged(x,y,z){
   if(lx===CHUNK_SIZE-1) rebuildChunkAt(x+1,z);
   if(lz===0) rebuildChunkAt(x,z-1);
   if(lz===CHUNK_SIZE-1) rebuildChunkAt(x,z+1);
+  updateMinimapColumn(x,z);
+}
+
+// ---------- Minimap: a static top-down view of the whole (fixed-size) world ----------
+// The terrain layer is a 1px-per-block offscreen canvas, baked once at load from each column's
+// topmost non-air block (so lakes read as water, clearings as grass, etc. using the exact same
+// BLOCK_COLOR every hotbar swatch already uses) and patched a single pixel at a time as blocks
+// change, rather than ever re-scanning the whole map. The visible canvas just rescales that image
+// every frame (crisp/nearest, no smoothing) and draws the live player positions on top of it.
+const MINIMAP_DISPLAY = 160;
+let minimapTerrainCanvas, minimapTerrainCtx, minimapCanvas, minimapCtx;
+function surfaceColorAt(x,z){
+  for(let y=WORLD_HEIGHT-1;y>=0;y--){
+    const b = getBlock(x,y,z);
+    if(b!==AIR) return BLOCK_COLOR[b]!=null ? BLOCK_COLOR[b] : 0x223322;
+  }
+  return 0x223322;
+}
+function updateMinimapColumn(x,z){
+  if(!minimapTerrainCtx) return;
+  minimapTerrainCtx.fillStyle = '#'+surfaceColorAt(x,z).toString(16).padStart(6,'0');
+  minimapTerrainCtx.fillRect(x,z,1,1);
+}
+function buildMinimapTerrain(){
+  minimapTerrainCanvas = document.createElement('canvas');
+  minimapTerrainCanvas.width = WORLD_SIZE;
+  minimapTerrainCanvas.height = WORLD_SIZE;
+  minimapTerrainCtx = minimapTerrainCanvas.getContext('2d');
+  for(let x=0;x<WORLD_SIZE;x++) for(let z=0;z<WORLD_SIZE;z++) updateMinimapColumn(x,z);
+  minimapCanvas = document.getElementById('minimapCanvas');
+  if(minimapCanvas){
+    minimapCtx = minimapCanvas.getContext('2d');
+    minimapCtx.imageSmoothingEnabled = false;
+  }
+}
+function drawMinimapDot(px,py,r,fillColor){
+  minimapCtx.beginPath();
+  minimapCtx.arc(px,py,r,0,Math.PI*2);
+  minimapCtx.fillStyle = fillColor;
+  minimapCtx.fill();
+  minimapCtx.lineWidth = 1;
+  minimapCtx.strokeStyle = 'rgba(0,0,0,0.6)';
+  minimapCtx.stroke();
+}
+function drawMinimapArrow(px,py,yaw,size,fillColor){
+  const fx = -Math.sin(yaw), fz = -Math.cos(yaw);
+  const rx = Math.cos(yaw), rz = -Math.sin(yaw);
+  minimapCtx.beginPath();
+  minimapCtx.moveTo(px+fx*size, py+fz*size);
+  minimapCtx.lineTo(px-fx*size*0.6+rx*size*0.55, py-fz*size*0.6+rz*size*0.55);
+  minimapCtx.lineTo(px-fx*size*0.6-rx*size*0.55, py-fz*size*0.6-rz*size*0.55);
+  minimapCtx.closePath();
+  minimapCtx.fillStyle = fillColor;
+  minimapCtx.fill();
+  minimapCtx.lineWidth = 1;
+  minimapCtx.strokeStyle = 'rgba(0,0,0,0.7)';
+  minimapCtx.stroke();
+}
+function updateMinimap(){
+  if(!minimapCanvas) return;
+  const S = MINIMAP_DISPLAY;
+  minimapCtx.clearRect(0,0,S,S);
+  minimapCtx.drawImage(minimapTerrainCanvas, 0,0, WORLD_SIZE, WORLD_SIZE, 0,0, S,S);
+  remotePlayers.forEach((e,id)=>{
+    const px = (e.mesh.position.x/WORLD_SIZE)*S, py = (e.mesh.position.z/WORLD_SIZE)*S;
+    drawMinimapDot(px,py,3,'#'+colorForId(id).toString(16).padStart(6,'0'));
+  });
+  if(!isDead){
+    const px = (player.pos.x/WORLD_SIZE)*S, py = (player.pos.z/WORLD_SIZE)*S;
+    drawMinimapArrow(px,py,player.yaw,6,'#fff2b0');
+  }
 }
 
 // ---------- Player ----------
@@ -3427,6 +3498,7 @@ function init(){
   generateWorld();
   loadEdits();
   restoreTorchLights();
+  buildMinimapTerrain();
   loadInventory();
   loadHotbar();
   rebuildAllChunks();
@@ -3504,6 +3576,7 @@ function animate(now){
 
   const coordsEl = document.getElementById('coordsLabel');
   if(coordsEl) coordsEl.textContent = `${player.pos.x.toFixed(1)}, ${player.pos.y.toFixed(1)}, ${player.pos.z.toFixed(1)}`;
+  updateMinimap();
 
   fpsTimer += dt; fpsCount++;
   if(fpsTimer>=0.5){

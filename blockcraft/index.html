@@ -33,6 +33,8 @@
   #nameInput::placeholder{color:rgba(255,255,255,0.55);}
   #nameInput:focus{border-color:#fff;}
   #hud{position:fixed;top:10px;left:10px;color:#fff;font-size:12px;text-shadow:0 0 3px #000;z-index:10;line-height:1.5;background:rgba(0,0,0,0.25);padding:6px 10px;border-radius:6px;pointer-events:none;}
+  #minimap{position:fixed;top:48px;left:10px;z-index:10;background:rgba(0,0,0,0.35);border:2px solid rgba(255,255,255,0.35);border-radius:8px;padding:4px;pointer-events:none;}
+  #minimapCanvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges;}
   #tempLabel.danger{color:#ff5a4a;font-weight:700;animation:tempPulse 1s ease-in-out infinite;}
   @keyframes tempPulse{0%,100%{opacity:1;}50%{opacity:0.55;}}
   #hearts{position:fixed;top:10px;left:50%;transform:translateX(-50%);display:flex;gap:2px;z-index:10;filter:drop-shadow(0 0 2px rgba(0,0,0,0.7));pointer-events:none;}
@@ -94,6 +96,7 @@
 </head>
 <body>
 <div id="hud">XYZ: <span id="coordsLabel">0, 0, 0</span> &nbsp;|&nbsp; Blocks edited: <span id="blockCount">0</span> &nbsp;|&nbsp; FPS: <span id="fps">0</span> &nbsp;|&nbsp; Players: <span id="playerCount">1</span> &nbsp;|&nbsp; <span id="mpStatus">Connecting…</span> &nbsp;|&nbsp; World Time: <span id="worldTimeLabel">00:00</span> &nbsp;|&nbsp; <span id="weatherLabel">Sunny</span> &nbsp;|&nbsp; <span id="windLabel">Calm</span> &nbsp;|&nbsp; <span id="seasonLabel">Spring</span> &nbsp;<span id="tempLabel">50°F</span></div>
+<div id="minimap"><canvas id="minimapCanvas" width="160" height="160"></canvas></div>
 <div id="hearts"></div>
 <div id="deathMessage" hidden>You died</div>
 <div id="hurtOverlay"></div>
