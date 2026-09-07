@@ -1342,6 +1342,8 @@ const SFX = {
   roar(){ playRoar(); },
   doorToggle(opening){ playDoorCreak(opening); },
   windowToggle(opening){ playWindowSlide(opening); },
+  rainPatter(vol){ playNoise(0.12, vol, 5500, 0.002); },
+  thunder(){ playNoise(1.6, 0.32, 220, 0.02); playTone(55, 1.2, 'sawtooth', 0.15, 30); },
 };
 lionRoarClip.load();
 
@@ -1663,6 +1665,134 @@ function updateDayNight(){
   const sunHeight = Math.sin(theta - Math.PI/2);
   const R = 150;
   sunLight.position.set(Math.cos(theta)*R, Math.max(5, sunHeight*R*0.6+40), Math.sin(theta)*R);
+}
+
+// ---------- Weather ----------
+// Like the day/night cycle, weather is derived straight from the wall clock — no syncing needed,
+// everyone in the shared world sees the same weather at the same time automatically.
+const WEATHER_PERIOD_S = 480;      // how long one weather episode lasts (8 min)
+const WEATHER_TRANSITION_S = 25;   // how long it takes to blend into a freshly-rolled episode
+const WEATHER_TYPES = [
+  // cumulative selection order matters only in that it's applied consistently; percentages per the spec
+  { id:'sunny',        p:0.50, fogMul:1.00, darken:0.00, rain:0.0,  thunder:false, label:'Sunny' },
+  { id:'cloudy',       p:0.15, fogMul:0.80, darken:0.28, rain:0.0,  thunder:false, label:'Cloudy' },
+  { id:'rainy',        p:0.20, fogMul:0.55, darken:0.42, rain:0.5,  thunder:false, label:'Rainy' },
+  { id:'rainstorm',    p:0.10, fogMul:0.40, darken:0.55, rain:1.0,  thunder:false, label:'Rainstorm' },
+  { id:'thunderstorm', p:0.05, fogMul:0.30, darken:0.68, rain:1.5,  thunder:true,  label:'Heavy Thunderstorm' },
+];
+function weatherHash(n){
+  const s = Math.sin(n*12.9898 + SEED*0.0007)*43758.5453123;
+  return s - Math.floor(s);
+}
+function weatherForEpoch(epoch){
+  const r = weatherHash(epoch);
+  let cum = 0;
+  for(const w of WEATHER_TYPES){ cum += w.p; if(r<cum) return w; }
+  return WEATHER_TYPES[0];
+}
+function currentWeatherBlend(){
+  const t = Date.now()/1000;
+  const epoch = Math.floor(t/WEATHER_PERIOD_S);
+  const into = t - epoch*WEATHER_PERIOD_S;
+  const to = weatherForEpoch(epoch);
+  if(into < WEATHER_TRANSITION_S){
+    const from = weatherForEpoch(epoch-1);
+    return { from, to, lt: into/WEATHER_TRANSITION_S };
+  }
+  return { from: to, to, lt: 1 };
+}
+function lerp(a,b,t){ return a+(b-a)*t; }
+let rainGeo, rainMat, rainPoints, rainVelocities;
+const RAIN_COUNT = 700;
+function ensureRain(){
+  if(rainPoints) return;
+  rainGeo = new THREE.BufferGeometry();
+  const positions = new Float32Array(RAIN_COUNT*3);
+  rainVelocities = new Float32Array(RAIN_COUNT);
+  for(let i=0;i<RAIN_COUNT;i++){
+    positions[i*3+1] = -9999;
+    rainVelocities[i] = 20 + Math.random()*10;
+  }
+  rainGeo.setAttribute('position', new THREE.BufferAttribute(positions,3));
+  rainMat = new THREE.PointsMaterial({ color:0xaad0f5, size:0.12, transparent:true, opacity:0.55, depthWrite:false });
+  rainPoints = new THREE.Points(rainGeo, rainMat);
+  rainPoints.frustumCulled = false;
+  scene.add(rainPoints);
+}
+function updateRain(dt, intensity){
+  if(intensity<=0){ if(rainPoints) rainPoints.visible=false; return; }
+  ensureRain();
+  rainPoints.visible = true;
+  const positions = rainGeo.attributes.position.array;
+  const activeCount = Math.min(RAIN_COUNT, Math.round(RAIN_COUNT * Math.min(1, intensity)));
+  const cx=player.pos.x, cy=player.pos.y, cz=player.pos.z;
+  for(let i=0;i<RAIN_COUNT;i++){
+    if(i>=activeCount){ positions[i*3+1] = -9999; continue; }
+    let y = positions[i*3+1];
+    if(y < cy-2){
+      positions[i*3] = cx + (Math.random()*2-1)*22;
+      positions[i*3+1] = cy + 14 + Math.random()*8;
+      positions[i*3+2] = cz + (Math.random()*2-1)*22;
+    } else {
+      positions[i*3+1] = y - rainVelocities[i]*dt;
+    }
+  }
+  rainGeo.attributes.position.needsUpdate = true;
+}
+let rainSoundTimer = 0, lightningTimer = 8+Math.random()*8;
+let lastWeatherLabel = null;
+function updateWeather(dt){
+  const { from, to, lt } = currentWeatherBlend();
+  const fogMul = lerp(from.fogMul, to.fogMul, lt);
+  const darken = lerp(from.darken, to.darken, lt);
+  const rain = lerp(from.rain, to.rain, lt);
+  const thunderActive = lt>0.5 ? to.thunder : from.thunder;
+
+  scene.fog.near = FAR*0.35*fogMul;
+  scene.fog.far = FAR*fogMul;
+  if(darken>0){
+    const grayHex = lerpColorHex(scene.background.getHex(), 0x30363d, darken);
+    scene.background.setHex(grayHex);
+    scene.fog.color.setHex(grayHex);
+  }
+  hemiLight.intensity *= (1 - darken*0.6);
+  sunLight.intensity *= (1 - darken*0.7);
+
+  updateRain(dt, rain);
+
+  if(rain>0 && locked){
+    rainSoundTimer -= dt;
+    if(rainSoundTimer<=0){
+      rainSoundTimer = 0.05 + Math.random()*0.08;
+      SFX.rainPatter(Math.min(0.12, 0.03 + rain*0.05));
+    }
+  }
+  if(thunderActive && locked){
+    lightningTimer -= dt;
+    if(lightningTimer<=0){
+      lightningTimer = 6 + Math.random()*14;
+      triggerLightning();
+    }
+  }
+
+  const label = to.label;
+  if(label !== lastWeatherLabel){
+    lastWeatherLabel = label;
+    const el = document.getElementById('weatherLabel');
+    if(el) el.textContent = label;
+  }
+}
+function triggerLightning(){
+  const el = document.getElementById('lightningFlash');
+  if(el){
+    el.style.transition = 'none';
+    el.style.opacity = '0.85';
+    requestAnimationFrame(()=>{
+      el.style.transition = 'opacity 0.6s ease-out';
+      el.style.opacity = '0';
+    });
+  }
+  setTimeout(()=> SFX.thunder(), 300+Math.random()*1200);
 }
 
 // ---------- Saplings: little trees that randomly appear on grass and slowly grow into full trees ----------
@@ -2431,6 +2561,7 @@ function animate(now){
   updateFallingClusters(dt);
   updateSaplings(dt);
   updateDayNight();
+  updateWeather(dt);
   broadcastPosition(now);
 
   if(thirdPerson){
