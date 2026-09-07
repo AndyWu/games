@@ -657,8 +657,20 @@ const player = {
   yaw: 0, pitch: 0, onGround: false,
   width: 0.6, height: 1.8, eye: 1.6,
 };
+// 10 fixed spawn points spread across the map, as fractions of WORLD_SIZE so they scale with it.
+const SPAWN_POINTS = [
+  [0.50,0.50], [0.20,0.20], [0.80,0.20], [0.20,0.80], [0.80,0.80],
+  [0.60,0.22], [0.50,0.80], [0.20,0.50], [0.80,0.50], [0.35,0.65],
+].map(([fx,fz]) => [Math.floor(fx*WORLD_SIZE), Math.floor(fz*WORLD_SIZE)]);
+let lastSpawnIndex = -1;
+function pickSpawnIndex(){
+  let idx;
+  do{ idx = Math.floor(Math.random()*SPAWN_POINTS.length); }while(idx===lastSpawnIndex);
+  lastSpawnIndex = idx;
+  return idx;
+}
 function spawnPlayer(){
-  const x = Math.floor(WORLD_SIZE/2), z = Math.floor(WORLD_SIZE/2);
+  const [x,z] = SPAWN_POINTS[pickSpawnIndex()];
   const h = heightAt(x,z);
   player.pos.set(x+0.5, h+2, z+0.5);
   player.vel.set(0,0,0);
@@ -1338,6 +1350,8 @@ try{ const savedName = localStorage.getItem('blockcraft_player_name'); if(savedN
 const REGEN_IDLE_DELAY = 2;   // seconds of standing still before regen starts
 const REGEN_INTERVAL = 1.5;   // seconds between each half-heart tick while idle
 let idleTimer = 0, regenTimer = 0;
+const RESPAWN_DELAY = 3;      // seconds a dead player is frozen before respawning
+let isDead = false, respawnTimer = 0;
 function heartSVG(kind, i){
   const red='#d9463c', gray='#4a4a4a', dark='#2a2a2a';
   const path = 'M12 21s-7.5-4.6-10-9.3C0.3 8.5 2 5 5.5 5c2 0 3.3 1.1 4 2.2C10.2 6.1 11.5 5 13.5 5 17 5 18.7 8.5 17 11.7 15.5 16.4 12 21 12 21z';
@@ -1382,13 +1396,28 @@ function damagePlayer(dmg, sourceType){
   if(myHP<=0) die();
 }
 function die(){
+  if(isDead) return;
+  isDead = true;
+  respawnTimer = RESPAWN_DELAY;
   const msg = document.getElementById('deathMessage');
-  if(msg){ msg.hidden = false; setTimeout(()=>{ msg.hidden = true; }, 1500); }
+  if(msg){ msg.hidden = false; msg.textContent = `You died — respawning in ${Math.ceil(respawnTimer)}…`; }
   SFX.death();
+}
+function respawnAfterDeath(){
+  isDead = false;
+  const msg = document.getElementById('deathMessage');
+  if(msg) msg.hidden = true;
   spawnPlayer();
   myHP = PLAYER_MAX_HP;
   updateHeartsUI();
   if(fbReady) db.ref('players/'+myId+'/hp').set(myHP);
+}
+function updateDeathState(dt){
+  if(!isDead) return;
+  respawnTimer -= dt;
+  const msg = document.getElementById('deathMessage');
+  if(msg) msg.textContent = `You died — respawning in ${Math.max(0,Math.ceil(respawnTimer))}…`;
+  if(respawnTimer <= 0) respawnAfterDeath();
 }
 function findAttackTarget(){
   const dir = getLookDir(player.yaw, player.pitch);
@@ -2031,7 +2060,7 @@ window.addEventListener('keydown', e=>{
   if(e.code==='Escape' && craftingOpen){ closeCrafting(false); return; }
   if(e.code==='KeyE'){
     if(craftingOpen){ closeCrafting(false); return; }
-    if(locked && nearestCraftingTable(4)) openCrafting();
+    if(locked && !isDead && nearestCraftingTable(4)) openCrafting();
     return;
   }
   if(e.code==='KeyV' && locked){ thirdPerson = !thirdPerson; return; }
@@ -2104,7 +2133,7 @@ document.addEventListener('mousemove', e=>{
 });
 document.addEventListener('contextmenu', e=> e.preventDefault());
 document.addEventListener('mousedown', e=>{
-  if(!locked) return;
+  if(!locked || isDead) return;
   if(e.button===0) doAttackOrBreak();
   if(e.button===2) doInteract();
 });
@@ -2183,8 +2212,8 @@ if(isTouchDevice){
     el.addEventListener('touchstart', e=>{ e.preventDefault(); e.stopPropagation(); onDown(); }, {passive:false});
     if(onUp) el.addEventListener('touchend', e=>{ e.preventDefault(); e.stopPropagation(); onUp(); }, {passive:false});
   }
-  bindTouchButton('btnAttack', ()=>{ if(locked && !craftingOpen) doAttackOrBreak(); });
-  bindTouchButton('btnPlace', ()=>{ if(locked && !craftingOpen) doInteract(); });
+  bindTouchButton('btnAttack', ()=>{ if(locked && !craftingOpen && !isDead) doAttackOrBreak(); });
+  bindTouchButton('btnPlace', ()=>{ if(locked && !craftingOpen && !isDead) doInteract(); });
   bindTouchButton('btnJump', ()=>{ keys['Space']=true; }, ()=>{ keys['Space']=false; });
   bindTouchButton('btn3p', ()=>{ if(locked) thirdPerson = !thirdPerson; });
 }
@@ -2329,9 +2358,10 @@ function animate(now){
   const dt = Math.min(0.05, (now-lastTime)/1000);
   lastTime = now;
 
-  if(locked) updatePlayer(dt);
+  if(locked && !isDead) updatePlayer(dt);
+  updateDeathState(dt);
 
-  const moving = locked && (keys['KeyW']||keys['KeyA']||keys['KeyS']||keys['KeyD']);
+  const moving = locked && !isDead && (keys['KeyW']||keys['KeyA']||keys['KeyS']||keys['KeyD']);
   const sprinting = !!(keys['ShiftLeft']||keys['ShiftRight']);
   updateCharacterAnim(dt, moving, sprinting);
   updateHandView(dt, moving, sprinting);
