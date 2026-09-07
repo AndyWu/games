@@ -1936,6 +1936,91 @@ function currentWeatherBlend(){
 }
 function lerp(a,b,t){ return a+(b-a)*t; }
 
+// ---------- Seasons & temperature ----------
+// Same wall-clock philosophy as day/night and weather — no state to save, everyone's always in
+// sync. A year is 4 seasons of 3 real hours each (12h/year); temperature is that season's average,
+// swung warmer at noon / colder at midnight by a cosine curve, plus a small organic wobble so it's
+// never exactly the same twice. Being outdoors (no roof, cave ceiling, or tree canopy overhead —
+// reusing the same sky-exposure idea the indoor-lighting fix uses) in genuinely dangerous heat or
+// cold drains HP faster than standing still can regenerate it.
+const SEASON_LENGTH_S = 3*3600;
+const YEAR_LENGTH_S = 4*SEASON_LENGTH_S;
+const SEASON_TRANSITION_S = 900; // 15 min blend into a freshly-arrived season
+const SEASONS = [
+  { id:'spring', label:'Spring', avgF:50 },
+  { id:'summer', label:'Summer', avgF:90 },
+  { id:'fall',   label:'Fall',   avgF:50 },
+  { id:'winter', label:'Winter', avgF:20 },
+];
+const DAILY_TEMP_SWING_F = 18; // +/- this many degrees between noon and midnight
+const COLD_DANGER_F = 10, HOT_DANGER_F = 100;
+const TEMP_DAMAGE_TICK_S = 4;
+function currentSeasonBlend(){
+  const t = Date.now()/1000;
+  const yearT = ((t % YEAR_LENGTH_S) + YEAR_LENGTH_S) % YEAR_LENGTH_S;
+  const idx = Math.floor(yearT / SEASON_LENGTH_S);
+  const into = yearT - idx*SEASON_LENGTH_S;
+  const to = SEASONS[idx];
+  if(into < SEASON_TRANSITION_S){
+    const from = SEASONS[(idx-1+4)%4];
+    return { from, to, lt: into/SEASON_TRANSITION_S };
+  }
+  return { from: to, to, lt: 1 };
+}
+function currentTemperatureF(){
+  const t = Date.now()/1000;
+  const { from, to, lt } = currentSeasonBlend();
+  const avgF = lerp(from.avgF, to.avgF, lt);
+  const dayTime = currentDayTime();
+  const dailyOffset = DAILY_TEMP_SWING_F * Math.cos((dayTime-0.5)*Math.PI*2);
+  const noise = (smoothNoise01(t*0.05, 91)*2-1) * 4;
+  return avgF + dailyOffset + noise;
+}
+// Straight-up sky check from an arbitrary live position (the player), as opposed to
+// computeSkyExposure() which is baked per-column into chunk mesh vertex colors at build time.
+function isPositionSkyExposed(x,y,z){
+  const bx=Math.floor(x), bz=Math.floor(z);
+  for(let cy=Math.floor(y)+1; cy<WORLD_HEIGHT; cy++){
+    const b = getBlock(bx,cy,bz);
+    if(b!==AIR && !TRANSPARENT_BLOCKS.has(b)) return false;
+  }
+  return true;
+}
+let tempDamageTimer = TEMP_DAMAGE_TICK_S;
+let lastSeasonLabel = null;
+function updateTemperature(dt){
+  const { to } = currentSeasonBlend();
+  const tempF = currentTemperatureF();
+  const outdoors = isPositionSkyExposed(player.pos.x, player.pos.y+player.eye, player.pos.z);
+  let danger = null;
+  if(tempF < COLD_DANGER_F) danger = 'cold';
+  else if(tempF > HOT_DANGER_F) danger = 'hot';
+  const inPeril = danger && outdoors && locked && !isDead;
+
+  if(to.label !== lastSeasonLabel){
+    lastSeasonLabel = to.label;
+    const el = document.getElementById('seasonLabel');
+    if(el) el.textContent = to.label;
+  }
+  const tempEl = document.getElementById('tempLabel');
+  if(tempEl){
+    let text = `${Math.round(tempF)}°F`;
+    if(inPeril) text += danger==='cold' ? ' ❄ Freezing!' : ' 🔥 Overheating!';
+    tempEl.textContent = text;
+    tempEl.classList.toggle('danger', !!inPeril);
+  }
+
+  tempDamageTimer -= dt;
+  if(tempDamageTimer<=0){
+    tempDamageTimer = TEMP_DAMAGE_TICK_S;
+    if(inPeril){
+      const extremity = danger==='cold' ? (COLD_DANGER_F-tempF) : (tempF-HOT_DANGER_F);
+      const dmg = Math.min(4, 1+Math.floor(extremity/6));
+      damagePlayer(dmg, 'temperature');
+    }
+  }
+}
+
 // ---------- Wind ----------
 // Same philosophy as day/night and weather: derived purely from the wall clock, so it's random
 // (nobody chose it) but perfectly in sync for every player with no networking at all. Strength is a
@@ -3068,6 +3153,7 @@ function animate(now){
   updateFires(dt);
   updateDayNight();
   updateWeather(dt);
+  updateTemperature(dt);
   broadcastPosition(now);
 
   if(thirdPerson){
