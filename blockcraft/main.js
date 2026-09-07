@@ -1536,78 +1536,87 @@ function applyWorldEdit(x,y,z,val,fromRemote){
   saveEdits();
   if(!fromRemote && fbReady) db.ref('world/edits/'+k).set(val);
 }
-// When a trunk block is cut, any leaves that are no longer reachable (through other leaves) to
-// some remaining wood are no longer supported and fall straight down to whatever is below them.
+// When a trunk block is cut, whatever wood+leaves are left connected to it but no longer resting on
+// anything solid (the ground, or a block outside the cut cluster) breaks free and actually falls —
+// real gravity, accelerating over time, until it hits something and settles as real blocks.
 function fallLandingY(x, startY, z){
   for(let y=startY-1; y>=1; y--) if(blockSolid(x,y,z)) return y+1;
   return 1;
 }
-function checkLeafSupport(bx, by, bz){
-  const R = 3;
-  const seeds = [];
-  for(let dx=-R; dx<=R; dx++)
-    for(let dy=-3; dy<=R; dy++)
-      for(let dz=-R; dz<=R; dz++){
-        const x=bx+dx, y=by+dy, z=bz+dz;
-        if(getBlock(x,y,z)===LEAVES) seeds.push([x,y,z]);
-      }
-  const globallyVisited = new Set();
-  for(const [sx,sy,sz] of seeds){
-    const skey = sx+','+sy+','+sz;
-    if(globallyVisited.has(skey)) continue;
-    const stack = [[sx,sy,sz]];
-    const localVisited = new Set([skey]);
-    const cluster = [];
-    let supported = false;
-    while(stack.length){
-      const [x,y,z] = stack.pop();
-      cluster.push([x,y,z]);
-      const neighbors = [[x+1,y,z],[x-1,y,z],[x,y+1,z],[x,y-1,z],[x,y,z+1],[x,y,z-1]];
-      for(const [nx,ny,nz] of neighbors){
-        const nb = getBlock(nx,ny,nz);
-        if(nb===WOOD) supported = true;
-        else if(nb===LEAVES){
-          const nk = nx+','+ny+','+nz;
-          if(!localVisited.has(nk) && cluster.length<150){ localVisited.add(nk); stack.push([nx,ny,nz]); }
-        }
-      }
-    }
-    cluster.forEach(([x,y,z]) => globallyVisited.add(x+','+y+','+z));
-    if(!supported) dropLeafCluster(cluster);
+function checkTreeSupport(bx, by, bz){
+  // Figures out which single tree the just-broken block belonged to and whether any of ITS
+  // remaining wood/leaves are now floating — deliberately not a general flood-fill through touching
+  // blocks. In a forest, neighboring trees' canopies constantly touch each other, so a flood-fill
+  // from a cut tree routinely wanders into an untouched neighbor that's still fully rooted and
+  // (correctly, but unhelpfully) reads the whole merged blob as supported — the chopped tree's own
+  // leaves would then never fall except in open ground. Reconstructing this tree's exact cell list
+  // from the same deterministic formula plantTree used to grow it sidesteps that entirely, and as a
+  // bonus leaves ordinary player-built wood structures (which won't match that shape) untouched.
+  const baseY = heightAt(bx,bz) + 1;
+  const treeCells = [];
+  plantTreeCells(bx, baseY, bz, (x,y,z,b) => treeCells.push([x,y,z,b]));
+  const stillThere = treeCells.filter(([x,y,z,b]) => getBlock(x,y,z)===b);
+  if(stillThere.length===0) return;
+  let groundedTrunkTop = null;
+  if(getBlock(bx,baseY,bz)===WOOD){
+    let y = baseY;
+    while(getBlock(bx,y,bz)===WOOD) y++;
+    groundedTrunkTop = y-1;
   }
+  const floating = stillThere.filter(([x,y,z]) =>
+    !(x===bx && z===bz && groundedTrunkTop!=null && y<=groundedTrunkTop)
+  );
+  if(floating.length>0) dropCluster(floating);
 }
-function dropLeafCluster(cells){
+function dropCluster(cells){
+  // Clear the originals first (synced) so the landing/drop calc below sees a cluster-free world —
+  // otherwise a piece could "land" on another piece of the very structure that's falling with it.
   for(const [x,y,z] of cells) applyWorldEdit(x,y,z,AIR,false);
-  for(const [x,y,z] of cells){
-    const landY = fallLandingY(x,y,z);
-    applyWorldEdit(x,landY,z,LEAVES,false);
-    spawnFallingLeafFX(x,y,z,landY);
-  }
+  // The drop distance is decided by the structure's LOWEST layer only (its trunk stub if any wood
+  // remains, otherwise its lowest leaves) — not the minimum across every cell. Using every cell was
+  // too fragile: one leaf out at the edge of the canopy happening to sit close to unrelated terrain
+  // could clamp the whole tree's fall to near zero even though the rest of it was clearly floating.
+  const minY = cells.reduce((m,[,y])=>Math.min(m,y), Infinity);
+  let drop = Infinity;
+  for(const [x,y,z] of cells) if(y===minY) drop = Math.min(drop, y - fallLandingY(x,y,z));
+  drop = Math.max(0, isFinite(drop) ? drop : 0);
+  spawnFallingCluster(cells, drop);
 }
-// Purely cosmetic: a small tumbling cube that falls from the leaf's old spot down to where the
-// real block just landed. The real (synced) block is already placed, this is just local flair.
-let leafFxGeo, leafFxMat;
-const fallingFX = [];
-function spawnFallingLeafFX(x,y,z,landY){
-  if(!leafFxGeo){
-    leafFxGeo = new THREE.BoxGeometry(0.55,0.55,0.55);
+// A short-lived local physics body: the whole disconnected chunk of trunk/canopy falls together
+// under real gravity and only turns back into real (synced) blocks once it settles.
+const fallingClusters = [];
+let woodFxMat, leafFxMat, fallGeo;
+function spawnFallingCluster(cells, drop){
+  if(!fallGeo){
+    fallGeo = new THREE.BoxGeometry(0.98,0.98,0.98);
+    woodFxMat = new THREE.MeshLambertMaterial({ color: BLOCK_COLOR[WOOD] });
     leafFxMat = new THREE.MeshLambertMaterial({ color: BLOCK_COLOR[LEAVES] });
   }
-  const mesh = new THREE.Mesh(leafFxGeo, leafFxMat);
-  mesh.position.set(x+0.5, y+0.5, z+0.5);
-  scene.add(mesh);
-  fallingFX.push({ mesh, vy:0, landY: landY+0.5 });
+  const group = new THREE.Group();
+  const originX = cells[0][0], originY = cells[0][1], originZ = cells[0][2];
+  for(const [x,y,z,b] of cells){
+    const mesh = new THREE.Mesh(fallGeo, b===WOOD ? woodFxMat : leafFxMat);
+    mesh.position.set(x-originX+0.5, y-originY+0.5, z-originZ+0.5);
+    group.add(mesh);
+  }
+  group.position.set(originX, originY, originZ);
+  scene.add(group);
+  if(drop<=0){ settleCluster({group, cells, originX, originY, originZ, drop}); return; }
+  fallingClusters.push({ group, cells, originX, originY, originZ, drop, fallen:0, vy:0 });
 }
-function updateFallingFX(dt){
-  for(let i=fallingFX.length-1;i>=0;i--){
-    const f = fallingFX[i];
+function settleCluster(f){
+  scene.remove(f.group);
+  for(const [x,y,z,b] of f.cells) applyWorldEdit(x, y-f.drop, z, b, false);
+}
+function updateFallingClusters(dt){
+  for(let i=fallingClusters.length-1;i>=0;i--){
+    const f = fallingClusters[i];
     f.vy += GRAVITY*dt;
-    f.mesh.position.y = Math.max(f.landY, f.mesh.position.y + f.vy*dt);
-    f.mesh.rotation.x += dt*4;
-    f.mesh.rotation.z += dt*3;
-    if(f.mesh.position.y <= f.landY){
-      scene.remove(f.mesh);
-      fallingFX.splice(i,1);
+    f.fallen = Math.min(f.drop, f.fallen - f.vy*dt);
+    f.group.position.y = f.originY - f.fallen;
+    if(f.fallen >= f.drop){
+      fallingClusters.splice(i,1);
+      settleCluster(f);
     }
   }
 }
@@ -2005,7 +2014,7 @@ function breakBlock(){
   }
   applyWorldEdit(hit.x, hit.y, hit.z, AIR, false);
   if(COLLECTIBLE.has(b)){ invAdd(COLLECT_AS[b] || b, 1); saveInventory(); }
-  if(b===WOOD) checkLeafSupport(hit.x, hit.y, hit.z);
+  if(b===WOOD) checkTreeSupport(hit.x, hit.y, hit.z);
   updateHotbarUI();
   triggerSwing();
   SFX.breakBlock();
@@ -2368,7 +2377,7 @@ function animate(now){
   updateRemotePlayers(dt);
   updateAnimals(dt);
   updateRespawns(dt);
-  updateFallingFX(dt);
+  updateFallingClusters(dt);
   updateSaplings(dt);
   broadcastPosition(now);
 

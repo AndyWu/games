@@ -122,7 +122,7 @@ If you don't want multiplayer at all, delete `firebase-config.js` and its `<scri
 ## Notes
 
 - The world is a fixed 128×128 block area (4x the original map) with procedurally generated hills, a beach/water line, and scattered trees — regenerated from a fixed seed, so it's the same every time you load it.
-- New little saplings sprout randomly on open grass over time and slowly grow — visibly taller every so often — into a full tree after a few real-world minutes. Break a sapling early and it's gone for good; break a full tree's trunk and any leaves left floating without support fall and land on the ground instead of staying stuck in the air.
+- New little saplings sprout randomly on open grass over time and slowly grow — visibly taller every so often — into a full tree after a few real-world minutes. Break a sapling early and it's gone for good; cut a tree's trunk and whatever's left disconnected from the ground (the rest of the trunk, still holding its canopy) actually falls — real accelerating gravity, not a teleport — landing wherever it hits solid ground below.
 - Block edits and inventory are saved to the browser's `localStorage`, so your progress persists across reloads on the same device/browser.
 - Best played on desktop with a mouse — pointer lock and WASD aren't a good fit for touch screens.
 - Everything is a single `<script>` tag pulling three.js from a CDN (`jsdelivr`), so there's nothing to install or build.
