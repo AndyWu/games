@@ -4,7 +4,7 @@
 'use strict';
 
 // ---------- Config ----------
-const WORLD_SIZE = 64;      // x/z extent
+const WORLD_SIZE = 128;     // x/z extent (4x the original 64x64 area, same generation algorithm)
 const WORLD_HEIGHT = 48;    // y extent
 const CHUNK_SIZE = 16;
 const CHUNKS_PER_SIDE = WORLD_SIZE / CHUNK_SIZE;
@@ -17,6 +17,7 @@ const FAR = 400;
 const AIR=0, GRASS=1, DIRT=2, STONE=3, SAND=4, WOOD=5, LEAVES=6, PLANKS=7, WATER=8, BEDROCK=9;
 const CRAFTING_TABLE=10, BRICKS=11, STICK=12;
 const WINDOW=13, WINDOW_OPEN=14, DOOR=15, DOOR_OPEN=16;
+const SAPLING=17;
 
 const BLOCK_COLOR = {
   [GRASS]:  0x5b8a3a,
@@ -35,12 +36,14 @@ const BLOCK_COLOR = {
   [WINDOW_OPEN]: 0xdff3fa,
   [DOOR]: 0x8a5a34,
   [DOOR_OPEN]: 0xa8815a,
+  [SAPLING]: 0x5b8a3a,
 };
 const BLOCK_NAME = {
   [GRASS]:'Grass', [DIRT]:'Dirt', [STONE]:'Stone', [SAND]:'Sand', [WOOD]:'Wood',
   [LEAVES]:'Leaves', [PLANKS]:'Planks', [WATER]:'Water',
   [CRAFTING_TABLE]:'Crafting Table', [BRICKS]:'Bricks', [STICK]:'Stick',
   [WINDOW]:'Window', [WINDOW_OPEN]:'Window (open)', [DOOR]:'Door', [DOOR_OPEN]:'Door (open)',
+  [SAPLING]:'Sapling',
 };
 const HOTBAR = [GRASS, DIRT, STONE, SAND, WOOD, LEAVES, PLANKS, WATER, CRAFTING_TABLE, BRICKS, WINDOW, DOOR];
 // Blocks with an open/closed state: right-clicking one toggles it to the other id in this map.
@@ -126,7 +129,7 @@ function nearestCraftingTable(maxDist){
 const TILE = 16, ATLAS_COLS = 4, ATLAS_ROWS = 5;
 const T_GRASS_TOP=0, T_GRASS_SIDE=1, T_DIRT=2, T_STONE=3, T_SAND=4, T_LOG_SIDE=5, T_LOG_TOP=6,
       T_LEAVES=7, T_PLANKS=8, T_BEDROCK=9, T_CRAFT_TOP=10, T_CRAFT_SIDE=11, T_BRICKS=12, T_WATER=13,
-      T_WINDOW=14, T_WINDOW_OPEN=15, T_DOOR=16, T_DOOR_OPEN=17;
+      T_WINDOW=14, T_WINDOW_OPEN=15, T_DOOR=16, T_DOOR_OPEN=17, T_SAPLING=18;
 
 function hexRGB(hex){ return [(hex>>16)&255, (hex>>8)&255, hex&255]; }
 function rgbStr(r,g,b){ return `rgb(${r|0},${g|0},${b|0})`; }
@@ -304,6 +307,17 @@ function drawDoorOpen(ctx,x0,y0){
   ctx.fillRect(x0+1,y0+1,TILE-2,1);
   ctx.fillRect(x0+1,y0+TILE-2,TILE-2,1);
 }
+function drawSapling(ctx,x0,y0){
+  fillTile(ctx,x0,y0,0x5b8a3a);
+  ctx.fillStyle = shadeStr(0x3a5c22,1,4);
+  ctx.fillRect(x0+7,y0+9,2,7);
+  ctx.fillStyle = shadeStr(0x74b84a,1,10);
+  for(let i=0;i<40;i++){
+    const px = x0+2+Math.floor(Math.random()*12);
+    const py = y0+2+Math.floor(Math.random()*10);
+    ctx.fillRect(px,py,1,1);
+  }
+}
 function buildAtlas(){
   const canvas = document.createElement('canvas');
   canvas.width = TILE*ATLAS_COLS;
@@ -311,7 +325,7 @@ function buildAtlas(){
   const ctx = canvas.getContext('2d');
   const draw = [drawGrassTop, drawGrassSide, drawDirt, drawStone, drawSand, drawLogSide, drawLogTop,
                 drawLeaves, drawPlanks, drawBedrock, drawCraftTop, drawCraftSide, drawBricks, drawWater,
-                drawWindow, drawWindowOpen, drawDoor, drawDoorOpen];
+                drawWindow, drawWindowOpen, drawDoor, drawDoorOpen, drawSapling];
   draw.forEach((fn, i)=> fn(ctx, (i%ATLAS_COLS)*TILE, Math.floor(i/ATLAS_COLS)*TILE));
   const tex = new THREE.CanvasTexture(canvas);
   tex.magFilter = THREE.NearestFilter;
@@ -344,6 +358,7 @@ const BLOCK_TILES = {
   [WINDOW_OPEN]: {top:T_WINDOW_OPEN, side:T_WINDOW_OPEN, bottom:T_WINDOW_OPEN},
   [DOOR]: {top:T_DOOR, side:T_DOOR, bottom:T_DOOR},
   [DOOR_OPEN]: {top:T_DOOR_OPEN, side:T_DOOR_OPEN, bottom:T_DOOR_OPEN},
+  [SAPLING]: {top:T_SAPLING, side:T_SAPLING, bottom:T_SAPLING},
 };
 // per-face-direction UV winding (0/1 flags select u0/u1 and vBottom/vTop), aligned to FACES order below
 const UV_PATTERNS = [
@@ -446,9 +461,12 @@ function generateWorld(){
     }
   }
 }
-function plantTree(x,y,z){
+// writeFn(bx,by,bz,block,unconditional) decides how each cell actually gets written — plantTree uses
+// a raw setBlock (fast, unsynced — fine for deterministic world-gen), plantTreeSynced routes through
+// applyWorldEdit so a sapling maturing at runtime is persisted/synced/rendered like any other edit.
+function plantTreeCells(x,y,z,writeFn){
   const height = 4 + Math.floor(hash2(x+1,z+1)*3);
-  for(let i=0;i<height;i++) setBlock(x,y+i,z,WOOD);
+  for(let i=0;i<height;i++) writeFn(x,y+i,z,WOOD,true);
   const top = y+height;
   for(let dy=-2;dy<=1;dy++){
     const r = dy>=0 ? 1 : 2;
@@ -456,11 +474,20 @@ function plantTree(x,y,z){
       for(let dz=-r;dz<=r;dz++){
         if(Math.abs(dx)===r && Math.abs(dz)===r && r===2) continue;
         if(dx===0 && dz===0 && dy<=0) continue;
-        const bx=x+dx, by=top+dy, bz=z+dz;
-        if(getBlock(bx,by,bz)===AIR) setBlock(bx,by,bz,LEAVES);
+        writeFn(x+dx, top+dy, z+dz, LEAVES, false);
       }
     }
   }
+}
+function plantTree(x,y,z){
+  plantTreeCells(x,y,z,(bx,by,bz,b,unconditional)=>{
+    if(unconditional || getBlock(bx,by,bz)===AIR) setBlock(bx,by,bz,b);
+  });
+}
+function plantTreeSynced(x,y,z){
+  plantTreeCells(x,y,z,(bx,by,bz,b,unconditional)=>{
+    if(unconditional || getBlock(bx,by,bz)===AIR) applyWorldEdit(bx,by,bz,b,false);
+  });
 }
 
 // ---------- Save / load edits ----------
@@ -531,7 +558,7 @@ const glassMaterial = new THREE.MeshLambertMaterial({ vertexColors: true, side: 
 // Any block that isn't fully opaque. A face between two blocks of the SAME transparent type is
 // skipped (no point rendering the seam between two adjacent water or window blocks); a face against
 // a *different* transparent type, or against AIR, still draws.
-const TRANSPARENT_BLOCKS = new Set([WATER, WINDOW, WINDOW_OPEN, DOOR_OPEN]);
+const TRANSPARENT_BLOCKS = new Set([WATER, WINDOW, WINDOW_OPEN, DOOR_OPEN, SAPLING]);
 function bucketFor(b){ return b===WATER ? 'water' : (TRANSPARENT_BLOCKS.has(b) ? 'glass' : 'solid'); }
 
 function buildChunkGeometries(cx,cz){
@@ -977,7 +1004,7 @@ function animateQuadrupedWalk(group, state, dt, moving, speedMul){
 const animals = [];
 // Ground for animals excludes tree material (WOOD/LEAVES) so they never end up standing in a
 // tree's trunk or canopy — only natural terrain and player-built blocks count as "ground".
-function isAnimalGround(b){ return b!==AIR && b!==WATER && b!==WOOD && b!==LEAVES && b!==WINDOW_OPEN && b!==DOOR_OPEN; }
+function isAnimalGround(b){ return b!==AIR && b!==WATER && b!==WOOD && b!==LEAVES && b!==WINDOW_OPEN && b!==DOOR_OPEN && b!==SAPLING; }
 function groundHeightAt(x,z){
   const bx=Math.floor(x), bz=Math.floor(z);
   for(let y=WORLD_HEIGHT-1;y>=0;y--){
@@ -1480,6 +1507,154 @@ function applyWorldEdit(x,y,z,val,fromRemote){
   saveEdits();
   if(!fromRemote && fbReady) db.ref('world/edits/'+k).set(val);
 }
+// When a trunk block is cut, any leaves that are no longer reachable (through other leaves) to
+// some remaining wood are no longer supported and fall straight down to whatever is below them.
+function fallLandingY(x, startY, z){
+  for(let y=startY-1; y>=1; y--) if(blockSolid(x,y,z)) return y+1;
+  return 1;
+}
+function checkLeafSupport(bx, by, bz){
+  const R = 3;
+  const seeds = [];
+  for(let dx=-R; dx<=R; dx++)
+    for(let dy=-3; dy<=R; dy++)
+      for(let dz=-R; dz<=R; dz++){
+        const x=bx+dx, y=by+dy, z=bz+dz;
+        if(getBlock(x,y,z)===LEAVES) seeds.push([x,y,z]);
+      }
+  const globallyVisited = new Set();
+  for(const [sx,sy,sz] of seeds){
+    const skey = sx+','+sy+','+sz;
+    if(globallyVisited.has(skey)) continue;
+    const stack = [[sx,sy,sz]];
+    const localVisited = new Set([skey]);
+    const cluster = [];
+    let supported = false;
+    while(stack.length){
+      const [x,y,z] = stack.pop();
+      cluster.push([x,y,z]);
+      const neighbors = [[x+1,y,z],[x-1,y,z],[x,y+1,z],[x,y-1,z],[x,y,z+1],[x,y,z-1]];
+      for(const [nx,ny,nz] of neighbors){
+        const nb = getBlock(nx,ny,nz);
+        if(nb===WOOD) supported = true;
+        else if(nb===LEAVES){
+          const nk = nx+','+ny+','+nz;
+          if(!localVisited.has(nk) && cluster.length<150){ localVisited.add(nk); stack.push([nx,ny,nz]); }
+        }
+      }
+    }
+    cluster.forEach(([x,y,z]) => globallyVisited.add(x+','+y+','+z));
+    if(!supported) dropLeafCluster(cluster);
+  }
+}
+function dropLeafCluster(cells){
+  for(const [x,y,z] of cells) applyWorldEdit(x,y,z,AIR,false);
+  for(const [x,y,z] of cells){
+    const landY = fallLandingY(x,y,z);
+    applyWorldEdit(x,landY,z,LEAVES,false);
+    spawnFallingLeafFX(x,y,z,landY);
+  }
+}
+// Purely cosmetic: a small tumbling cube that falls from the leaf's old spot down to where the
+// real block just landed. The real (synced) block is already placed, this is just local flair.
+let leafFxGeo, leafFxMat;
+const fallingFX = [];
+function spawnFallingLeafFX(x,y,z,landY){
+  if(!leafFxGeo){
+    leafFxGeo = new THREE.BoxGeometry(0.55,0.55,0.55);
+    leafFxMat = new THREE.MeshLambertMaterial({ color: BLOCK_COLOR[LEAVES] });
+  }
+  const mesh = new THREE.Mesh(leafFxGeo, leafFxMat);
+  mesh.position.set(x+0.5, y+0.5, z+0.5);
+  scene.add(mesh);
+  fallingFX.push({ mesh, vy:0, landY: landY+0.5 });
+}
+function updateFallingFX(dt){
+  for(let i=fallingFX.length-1;i>=0;i--){
+    const f = fallingFX[i];
+    f.vy += GRAVITY*dt;
+    f.mesh.position.y = Math.max(f.landY, f.mesh.position.y + f.vy*dt);
+    f.mesh.rotation.x += dt*4;
+    f.mesh.rotation.z += dt*3;
+    if(f.mesh.position.y <= f.landY){
+      scene.remove(f.mesh);
+      fallingFX.splice(i,1);
+    }
+  }
+}
+
+// ---------- Saplings: little trees that randomly appear on grass and slowly grow into full trees ----------
+const SAPLING_MAX_STAGE = 3;          // height in blocks while still growing, before it becomes a real tree
+const SAPLING_STAGE_MS = 40000;       // real time between each extra block of height
+const SAPLING_MATURE_MS = 300000;     // real time (5 min) from planting until it becomes a full tree
+const SAPLING_CAP = 30;               // roughly how many can be growing across the map at once
+const SAPLING_SPAWN_CHECK_S = 15;     // how often each client rolls the dice on spawning a new one
+const saplings = new Map(); // key "x,z" -> {y: baseY, plantedAt: ms-since-epoch}
+let saplingTickTimer = 0, saplingSpawnTimer = SAPLING_SPAWN_CHECK_S;
+function saplingStageForElapsed(elapsedMs){
+  return Math.min(SAPLING_MAX_STAGE, 1 + Math.floor(elapsedMs / SAPLING_STAGE_MS));
+}
+function findSaplingColumn(x,y,z){
+  let baseY = y;
+  while(getBlock(x,baseY-1,z)===SAPLING) baseY--;
+  const cells = [];
+  let cy = baseY;
+  while(getBlock(x,cy,z)===SAPLING){ cells.push({x,y:cy,z}); cy++; }
+  return cells;
+}
+function cancelSapling(x,z){
+  const key = x+','+z;
+  saplings.delete(key);
+  if(fbReady) db.ref('world/saplings/'+key).remove();
+}
+function plantSapling(x,y,z){
+  const key = x+','+z;
+  saplings.set(key, { y, plantedAt: Date.now() });
+  applyWorldEdit(x,y,z,SAPLING,false);
+  if(fbReady) db.ref('world/saplings/'+key).set({ y, t: firebase.database.ServerValue.TIMESTAMP });
+}
+function trySpawnSapling(){
+  if(saplings.size >= SAPLING_CAP) return;
+  for(let tries=0; tries<10; tries++){
+    const x = 2 + Math.floor(Math.random()*(WORLD_SIZE-4));
+    const z = 2 + Math.floor(Math.random()*(WORLD_SIZE-4));
+    const h = heightAt(x,z);
+    if(h<=SEA_LEVEL) continue;
+    if(getBlock(x,h,z)!==GRASS) continue;
+    if(getBlock(x,h+1,z)!==AIR) continue;
+    if(saplings.has(x+','+z)) continue;
+    plantSapling(x,h+1,z);
+    return;
+  }
+}
+function updateSaplings(dt){
+  saplingTickTimer -= dt;
+  if(saplingTickTimer<=0){
+    saplingTickTimer = 2;
+    const now = Date.now();
+    for(const [key, info] of Array.from(saplings.entries())){
+      const [xs,zs] = key.split(',');
+      const x = Number(xs), z = Number(zs), y = info.y;
+      const elapsed = now - info.plantedAt;
+      if(elapsed >= SAPLING_MATURE_MS){
+        for(let dy=0; dy<SAPLING_MAX_STAGE; dy++){
+          if(getBlock(x,y+dy,z)===SAPLING) applyWorldEdit(x,y+dy,z,AIR,false);
+        }
+        plantTreeSynced(x,y,z);
+        saplings.delete(key);
+        if(fbReady) db.ref('world/saplings/'+key).remove();
+        continue;
+      }
+      const stage = saplingStageForElapsed(elapsed);
+      for(let dy=0; dy<stage; dy++){
+        if(getBlock(x,y+dy,z)===AIR) applyWorldEdit(x,y+dy,z,SAPLING,false);
+      }
+    }
+  }
+  saplingSpawnTimer -= dt;
+  if(saplingSpawnTimer<=0){ saplingSpawnTimer = SAPLING_SPAWN_CHECK_S; trySpawnSapling(); }
+}
+
 function findDoorCells(x,y,z){
   const isDoor = b => b===DOOR || b===DOOR_OPEN;
   let baseY = y;
@@ -1565,6 +1740,15 @@ function initMultiplayer(){
       applyRemoteMobHp(snap.key, snap.val() && snap.val().hp);
     });
 
+    db.ref('world/saplings').on('child_added', snap=>{
+      const val = snap.val();
+      if(!val || saplings.has(snap.key)) return;
+      saplings.set(snap.key, { y: val.y, plantedAt: val.t });
+    });
+    db.ref('world/saplings').on('child_removed', snap=>{
+      saplings.delete(snap.key);
+    });
+
     db.ref('players').on('child_added', snap=>{
       if(snap.key===myId) return;
       addRemotePlayer(snap.key, snap.val());
@@ -1628,7 +1812,7 @@ function updateHandView(dt, moving, sprinting){
 
 function blockSolid(bx,by,bz){
   const b = getBlock(bx,by,bz);
-  return b!==AIR && b!==WATER && b!==WINDOW_OPEN && b!==DOOR_OPEN;
+  return b!==AIR && b!==WATER && b!==WINDOW_OPEN && b!==DOOR_OPEN && b!==SAPLING;
 }
 function collidesBox(px,py,pz){
   const w = player.width/2;
@@ -1781,8 +1965,18 @@ function breakBlock(){
     SFX.breakBlock();
     return;
   }
+  if(b===SAPLING){
+    const cells = findSaplingColumn(hit.x,hit.y,hit.z);
+    for(const c of cells) applyWorldEdit(c.x, c.y, c.z, AIR, false);
+    cancelSapling(hit.x, hit.z);
+    updateHotbarUI();
+    triggerSwing();
+    SFX.breakBlock();
+    return;
+  }
   applyWorldEdit(hit.x, hit.y, hit.z, AIR, false);
   if(COLLECTIBLE.has(b)){ invAdd(COLLECT_AS[b] || b, 1); saveInventory(); }
+  if(b===WOOD) checkLeafSupport(hit.x, hit.y, hit.z);
   updateHotbarUI();
   triggerSwing();
   SFX.breakBlock();
@@ -2144,6 +2338,8 @@ function animate(now){
   updateRemotePlayers(dt);
   updateAnimals(dt);
   updateRespawns(dt);
+  updateFallingFX(dt);
+  updateSaplings(dt);
   broadcastPosition(now);
 
   if(thirdPerson){
