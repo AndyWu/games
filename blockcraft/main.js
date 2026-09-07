@@ -885,16 +885,10 @@ function buildMinimapTerrain(){
     minimapCtx.imageSmoothingEnabled = false;
   }
 }
-function drawMinimapDot(px,py,r,fillColor){
-  minimapCtx.beginPath();
-  minimapCtx.arc(px,py,r,0,Math.PI*2);
-  minimapCtx.fillStyle = fillColor;
-  minimapCtx.fill();
-  minimapCtx.lineWidth = 1;
-  minimapCtx.strokeStyle = 'rgba(0,0,0,0.6)';
-  minimapCtx.stroke();
-}
-function drawMinimapArrow(px,py,yaw,size,fillColor){
+// Points in the direction the character is actually facing (same forward-vector convention used
+// for door placement: (-sin(yaw), -cos(yaw))), so at a glance you can tell which way someone's
+// looking, not just where they are.
+function drawMinimapTriangle(px,py,yaw,size,fillColor){
   const fx = -Math.sin(yaw), fz = -Math.cos(yaw);
   const rx = Math.cos(yaw), rz = -Math.sin(yaw);
   minimapCtx.beginPath();
@@ -908,6 +902,35 @@ function drawMinimapArrow(px,py,yaw,size,fillColor){
   minimapCtx.strokeStyle = 'rgba(0,0,0,0.7)';
   minimapCtx.stroke();
 }
+function drawMinimapStar(px,py,outerR,fillColor){
+  const spikes = 5, innerR = outerR*0.45;
+  let rot = -Math.PI/2; // start pointing straight up
+  const step = Math.PI/spikes;
+  minimapCtx.beginPath();
+  minimapCtx.moveTo(px+Math.cos(rot)*outerR, py+Math.sin(rot)*outerR);
+  for(let i=0;i<spikes;i++){
+    rot += step;
+    minimapCtx.lineTo(px+Math.cos(rot)*innerR, py+Math.sin(rot)*innerR);
+    rot += step;
+    minimapCtx.lineTo(px+Math.cos(rot)*outerR, py+Math.sin(rot)*outerR);
+  }
+  minimapCtx.closePath();
+  minimapCtx.fillStyle = fillColor;
+  minimapCtx.fill();
+  minimapCtx.lineWidth = 1;
+  minimapCtx.strokeStyle = 'rgba(0,0,0,0.7)';
+  minimapCtx.stroke();
+}
+function drawMinimapLabel(px,py,text){
+  minimapCtx.font = '9px sans-serif';
+  minimapCtx.textAlign = 'center';
+  minimapCtx.textBaseline = 'top';
+  minimapCtx.lineWidth = 2;
+  minimapCtx.strokeStyle = 'rgba(0,0,0,0.85)';
+  minimapCtx.strokeText(text, px, py);
+  minimapCtx.fillStyle = '#fff';
+  minimapCtx.fillText(text, px, py);
+}
 function updateMinimap(){
   if(!minimapCanvas) return;
   const S = MINIMAP_DISPLAY;
@@ -915,11 +938,13 @@ function updateMinimap(){
   minimapCtx.drawImage(minimapTerrainCanvas, 0,0, WORLD_SIZE, WORLD_SIZE, 0,0, S,S);
   remotePlayers.forEach((e,id)=>{
     const px = (e.mesh.position.x/WORLD_SIZE)*S, py = (e.mesh.position.z/WORLD_SIZE)*S;
-    drawMinimapDot(px,py,3,'#'+colorForId(id).toString(16).padStart(6,'0'));
+    drawMinimapTriangle(px,py,e.mesh.rotation.y,5,'#'+colorForId(id).toString(16).padStart(6,'0'));
+    drawMinimapLabel(px, py+6, e.name || 'Player');
   });
   if(!isDead){
     const px = (player.pos.x/WORLD_SIZE)*S, py = (player.pos.z/WORLD_SIZE)*S;
-    drawMinimapArrow(px,py,player.yaw,6,'#fff2b0');
+    drawMinimapStar(px,py,6,'#fff2b0');
+    drawMinimapLabel(px, py+8, myName || 'You');
   }
 }
 
