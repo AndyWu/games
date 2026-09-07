@@ -152,7 +152,9 @@ function nearestCraftingTable(maxDist){
 }
 
 // ---------- Texture atlas (procedurally drawn pixel-art, no external image assets) ----------
-const TILE = 16, ATLAS_COLS = 4, ATLAS_ROWS = 6;
+// TILE=32 (was 16) gives 4x the pixel budget per block face — enough room for real structure
+// (cracks, grain, brick-by-brick variation, ripples) rather than flat color + noise.
+const TILE = 32, ATLAS_COLS = 4, ATLAS_ROWS = 6;
 const T_GRASS_TOP=0, T_GRASS_SIDE=1, T_DIRT=2, T_STONE=3, T_SAND=4, T_LOG_SIDE=5, T_LOG_TOP=6,
       T_LEAVES=7, T_PLANKS=8, T_BEDROCK=9, T_CRAFT_TOP=10, T_CRAFT_SIDE=11, T_BRICKS=12, T_WATER=13,
       T_WINDOW=14, T_WINDOW_OPEN=15, T_DOOR=16, T_DOOR_OPEN=17, T_SAPLING=18, T_FLINT=19, T_FIRE=20,
@@ -180,80 +182,157 @@ function speckle(ctx,x0,y0,baseHex,count,jitter){
     ctx.fillRect(px,py,1,1);
   }
 }
+// A soft, irregular clump of pixels around a point — used wherever flat speckle alone looked too
+// uniform (grass tufts, dirt clumps, leaf clusters, rock chunks, flame licks).
+function blob(ctx,cx,cy,r,baseHex,jitter){
+  const n = Math.max(4, Math.round(r*r*0.9));
+  for(let i=0;i<n;i++){
+    const ang = Math.random()*Math.PI*2, rad = Math.random()*r;
+    const px = Math.round(cx+Math.cos(ang)*rad), py = Math.round(cy+Math.sin(ang)*rad);
+    ctx.fillStyle = shadeStr(baseHex, 0.75+Math.random()*0.5, jitter||0);
+    ctx.fillRect(px,py,1,1);
+  }
+}
 function drawGrassTop(ctx,x0,y0){
   fillTile(ctx,x0,y0,0x5b8a3a);
-  speckle(ctx,x0,y0,0x5b8a3a,70,18);
+  for(let i=0;i<7;i++) blob(ctx, x0+Math.random()*TILE, y0+Math.random()*TILE, TILE*0.22, 0x5b8a3a, 20);
+  speckle(ctx,x0,y0,0x5b8a3a,Math.round(TILE*TILE*0.3),18);
+  for(let i=0;i<TILE*1.6;i++){
+    const px=x0+Math.floor(Math.random()*TILE), py=y0+Math.floor(Math.random()*TILE);
+    ctx.fillStyle = shadeStr(0x74b84a, 1, 10);
+    ctx.fillRect(px,py,1,1+Math.floor(Math.random()*2));
+  }
 }
 function drawGrassSide(ctx,x0,y0){
   fillTile(ctx,x0,y0,0x7a5230);
-  speckle(ctx,x0,y0,0x7a5230,40,14);
+  speckle(ctx,x0,y0,0x7a5230,Math.round(TILE*TILE*0.2),14);
+  for(let i=0;i<TILE*0.5;i++){
+    const px=x0+Math.floor(Math.random()*TILE), py=y0+Math.floor(TILE*0.35)+Math.floor(Math.random()*Math.floor(TILE*0.6));
+    ctx.fillStyle = shadeStr(0x4a2f18,1,6);
+    ctx.fillRect(px,py,1,1);
+  }
+  const bandH = TILE*0.3;
   for(let x=0;x<TILE;x++){
-    const h = 3 + (x%3===0 ? 1 : 0);
+    const h = bandH + Math.sin(x*0.9)*2 + Math.random()*3;
     for(let y=0;y<h;y++){
-      ctx.fillStyle = shadeStr(0x5b8a3a, 0.85+Math.random()*0.3, 12);
+      ctx.fillStyle = shadeStr(0x5b8a3a, 0.8+Math.random()*0.35, 12);
       ctx.fillRect(x0+x, y0+TILE-1-y, 1, 1);
     }
   }
+  ctx.fillStyle = shadeStr(0x3f2c18,1,4);
+  ctx.fillRect(x0,y0+TILE-1-Math.floor(bandH),TILE,1);
 }
 function drawDirt(ctx,x0,y0){
   fillTile(ctx,x0,y0,0x7a5230);
-  speckle(ctx,x0,y0,0x7a5230,60,16);
+  for(let i=0;i<5;i++) blob(ctx, x0+Math.random()*TILE, y0+Math.random()*TILE, TILE*0.16, 0x7a5230, 14);
+  speckle(ctx,x0,y0,0x7a5230,Math.round(TILE*TILE*0.22),16);
+  for(let i=0;i<TILE*0.5;i++){
+    const px=x0+Math.floor(Math.random()*TILE), py=y0+Math.floor(Math.random()*TILE);
+    ctx.fillStyle = shadeStr(0xc9b98f,1,6);
+    ctx.fillRect(px,py,1,1);
+  }
 }
 function drawStone(ctx,x0,y0){
   fillTile(ctx,x0,y0,0x8a8a8a);
-  speckle(ctx,x0,y0,0x8a8a8a,70,20);
-  for(let i=0;i<4;i++){
-    const x=x0+Math.floor(Math.random()*TILE), y=y0+Math.floor(Math.random()*TILE);
-    ctx.fillStyle = shadeStr(0x8a8a8a,0.6,6);
-    ctx.fillRect(x,y,1+Math.floor(Math.random()*2),1);
+  for(let i=0;i<5;i++) blob(ctx, x0+Math.random()*TILE, y0+Math.random()*TILE, TILE*0.2, 0x8a8a8a, 14);
+  speckle(ctx,x0,y0,0x8a8a8a,Math.round(TILE*TILE*0.26),20);
+  for(let c=0;c<3;c++){
+    let px = x0+Math.random()*TILE, py = y0+Math.random()*TILE;
+    const steps = 4+Math.floor(Math.random()*4);
+    ctx.fillStyle = shadeStr(0x8a8a8a,0.55,6);
+    for(let s=0;s<steps;s++){
+      ctx.fillRect(Math.round(px),Math.round(py),1,1);
+      px += (Math.random()*2-1)*2; py += (Math.random()*2-1)*2;
+    }
+  }
+  for(let i=0;i<TILE*0.4;i++){
+    const px=x0+Math.floor(Math.random()*TILE), py=y0+Math.floor(Math.random()*TILE);
+    ctx.fillStyle = shadeStr(0xc4c4c4,1,8);
+    ctx.fillRect(px,py,1,1);
   }
 }
 function drawSand(ctx,x0,y0){
   fillTile(ctx,x0,y0,0xe0d18f);
-  speckle(ctx,x0,y0,0xe0d18f,50,14);
+  speckle(ctx,x0,y0,0xe0d18f,Math.round(TILE*TILE*0.2),14);
+  for(let i=0;i<4;i++){
+    const y = y0+Math.floor(Math.random()*TILE);
+    ctx.fillStyle = shadeStr(0xe0d18f, 1.08+Math.random()*0.1, 4);
+    const len = TILE*0.4+Math.random()*TILE*0.5;
+    ctx.fillRect(x0+Math.random()*(TILE-len),y,len,1);
+  }
 }
 function drawLogSide(ctx,x0,y0){
   fillTile(ctx,x0,y0,0x6b4a2b);
-  speckle(ctx,x0,y0,0x6b4a2b,25,8);
-  for(let x=0;x<TILE;x+=3){
-    for(let y=0;y<TILE;y++){
-      if(Math.random()<0.75){
-        ctx.fillStyle = shadeStr(0x6b4a2b,0.7,6);
-        ctx.fillRect(x0+x,y0+y,1,1);
+  speckle(ctx,x0,y0,0x6b4a2b,Math.round(TILE*TILE*0.12),8);
+  let x=0;
+  while(x<TILE){
+    const w = 2+Math.floor(Math.random()*3);
+    const f = 0.65+Math.random()*0.3;
+    for(let dx=0;dx<w && x+dx<TILE;dx++){
+      for(let y=0;y<TILE;y++){
+        if(Math.random()<0.85){
+          ctx.fillStyle = shadeStr(0x6b4a2b,f+(Math.random()*0.1-0.05),6);
+          ctx.fillRect(x0+x+dx,y0+y,1,1);
+        }
       }
     }
+    x += w;
   }
+  if(Math.random()<0.7) blob(ctx, x0+TILE*0.3+Math.random()*TILE*0.4, y0+TILE*0.3+Math.random()*TILE*0.4, TILE*0.09, 0x3f2c18, 4);
 }
 function drawLogTop(ctx,x0,y0){
   fillTile(ctx,x0,y0,0xc9a06b);
   const cx=x0+TILE/2, cy=y0+TILE/2;
+  const wobble = 0.4+Math.random()*0.3, wobbleSeed = Math.random()*10;
   for(let y=0;y<TILE;y++){
     for(let x=0;x<TILE;x++){
-      const d = Math.hypot(x0+x+0.5-cx, y0+y+0.5-cy);
-      const ring = Math.floor(d/1.6)%2;
-      ctx.fillStyle = shadeStr(0xc9a06b, ring===0 ? 1.0 : 0.82, 6);
+      const dx=x0+x+0.5-cx, dy=y0+y+0.5-cy;
+      const d = Math.hypot(dx,dy) + Math.sin(Math.atan2(dy,dx)*5+wobbleSeed)*wobble;
+      const ring = Math.floor(d/2.2)%2;
+      ctx.fillStyle = shadeStr(0xc9a06b, ring===0 ? 1.0 : 0.8, 6);
       ctx.fillRect(x0+x,y0+y,1,1);
     }
   }
+  ctx.fillStyle = shadeStr(0x6b4a2b,1,4);
+  ctx.fillRect(x0,y0,TILE,2); ctx.fillRect(x0,y0+TILE-2,TILE,2);
+  ctx.fillRect(x0,y0,2,TILE); ctx.fillRect(x0+TILE-2,y0,2,TILE);
 }
 function drawLeaves(ctx,x0,y0){
   fillTile(ctx,x0,y0,0x3f7d34);
-  speckle(ctx,x0,y0,0x3f7d34,110,26);
+  for(let i=0;i<10;i++) blob(ctx, x0+Math.random()*TILE, y0+Math.random()*TILE, TILE*0.2, 0x3f7d34, 24);
+  speckle(ctx,x0,y0,0x3f7d34,Math.round(TILE*TILE*0.3),26);
+  for(let i=0;i<TILE*0.3;i++){
+    const px=x0+Math.floor(Math.random()*TILE), py=y0+Math.floor(Math.random()*TILE);
+    ctx.fillStyle = shadeStr(0x24401f,1,6);
+    ctx.fillRect(px,py,1,1);
+  }
 }
 function drawPlanks(ctx,x0,y0){
   fillTile(ctx,x0,y0,0xb8894f);
-  speckle(ctx,x0,y0,0xb8894f,40,10);
-  for(let y=0;y<TILE;y+=4){
-    ctx.fillStyle = shadeStr(0xb8894f,0.65,4);
+  const boardH = TILE/4;
+  for(let y=0;y<TILE;y+=boardH){
+    const boardTone = 0.9+Math.random()*0.2;
+    for(let dy=0;dy<boardH;dy++){
+      for(let x=0;x<TILE;x++){
+        ctx.fillStyle = shadeStr(0xb8894f, boardTone+(Math.random()*0.08-0.04), 6);
+        ctx.fillRect(x0+x,y0+y+dy,1,1);
+      }
+    }
+    for(let i=0;i<4;i++){
+      const gy = y0+y+1+Math.floor(Math.random()*(boardH-2));
+      ctx.fillStyle = shadeStr(0xb8894f,0.75,4);
+      ctx.fillRect(x0+Math.floor(Math.random()*(TILE-6)),gy,4+Math.floor(Math.random()*4),1);
+    }
+    ctx.fillStyle = shadeStr(0xb8894f,0.6,4);
     ctx.fillRect(x0,y0+y,TILE,1);
-    const seam = Math.floor(Math.random()*TILE);
-    ctx.fillStyle = shadeStr(0xb8894f,0.75,4);
-    ctx.fillRect(x0+seam,y0+y,1,3);
+    ctx.fillStyle = shadeStr(0xb8894f,0.7,4);
+    ctx.fillRect(x0+Math.floor(Math.random()*TILE),y0+y,1,boardH);
   }
 }
 function drawBedrock(ctx,x0,y0){
   fillTile(ctx,x0,y0,0x2b2b2b);
-  for(let i=0;i<40;i++){
+  for(let i=0;i<6;i++) blob(ctx, x0+Math.random()*TILE, y0+Math.random()*TILE, TILE*0.22, 0x2b2b2b, 10);
+  for(let i=0;i<TILE*TILE*0.16;i++){
     const x=x0+Math.floor(Math.random()*TILE), y=y0+Math.floor(Math.random()*TILE);
     ctx.fillStyle = shadeStr(0x2b2b2b,0.5+Math.random()*0.9,10);
     const s = 1+Math.floor(Math.random()*2);
@@ -263,127 +342,158 @@ function drawBedrock(ctx,x0,y0){
 function drawCraftTop(ctx,x0,y0){
   drawPlanks(ctx,x0,y0);
   ctx.fillStyle = shadeStr(0x3a2a1a,1,4);
-  ctx.fillRect(x0+1,y0+1,TILE-2,1);
-  ctx.fillRect(x0+1,y0+TILE-2,TILE-2,1);
-  ctx.fillRect(x0+1,y0+1,1,TILE-2);
-  ctx.fillRect(x0+TILE-2,y0+1,1,TILE-2);
-  ctx.fillRect(x0+TILE/2-1,y0+3,2,TILE-6);
-  ctx.fillRect(x0+3,y0+TILE/2-1,TILE-6,2);
+  ctx.fillRect(x0+2,y0+2,TILE-4,2);
+  ctx.fillRect(x0+2,y0+TILE-4,TILE-4,2);
+  ctx.fillRect(x0+2,y0+2,2,TILE-4);
+  ctx.fillRect(x0+TILE-4,y0+2,2,TILE-4);
+  ctx.fillRect(x0+TILE/2-1,y0+5,2,TILE-10);
+  ctx.fillRect(x0+5,y0+TILE/2-1,TILE-10,2);
+  ctx.fillStyle = shadeStr(0x1c1410,1,2);
+  [[3,3],[TILE-5,3],[3,TILE-5],[TILE-5,TILE-5]].forEach(([dx,dy])=> ctx.fillRect(x0+dx,y0+dy,2,2));
 }
 function drawCraftSide(ctx,x0,y0){
   drawPlanks(ctx,x0,y0);
   ctx.fillStyle = shadeStr(0x3a2a1a,1,4);
-  ctx.fillRect(x0+2,y0+6,TILE-4,4);
+  ctx.fillRect(x0+4,y0+TILE*0.35,TILE-8,TILE*0.28);
   ctx.fillStyle = shadeStr(0xc9a06b,1,4);
-  ctx.fillRect(x0+4,y0+7,2,2);
-  ctx.fillRect(x0+TILE-6,y0+7,2,2);
+  ctx.fillRect(x0+7,y0+TILE*0.42,4,4);
+  ctx.fillRect(x0+TILE-11,y0+TILE*0.42,4,4);
+  ctx.fillStyle = shadeStr(0x1c1410,1,2);
+  ctx.fillRect(x0+3,y0+3,2,2);
+  ctx.fillRect(x0+TILE-5,y0+3,2,2);
 }
 function drawBricks(ctx,x0,y0){
   fillTile(ctx,x0,y0,0x9a4a3a);
-  speckle(ctx,x0,y0,0x9a4a3a,30,10);
   const mortar = shadeStr(0x5a3a30,1,0);
+  const brickH = TILE/4, brickW = TILE/2;
   let row=0;
-  for(let y=0;y<TILE;y+=4){
+  for(let y=0;y<TILE;y+=brickH){
+    const offset = (row%2===0)?0:brickW/2;
+    for(let bx=-brickW; bx<TILE+brickW; bx+=brickW){
+      const tone = 0.85+Math.random()*0.3;
+      for(let dy=1;dy<brickH-1;dy++){
+        for(let dx=1;dx<brickW-1;dx++){
+          const px = x0+bx+offset+dx, py = y0+y+dy;
+          if(px<x0||px>=x0+TILE) continue;
+          ctx.fillStyle = shadeStr(0x9a4a3a, tone+(Math.random()*0.06-0.03), 6);
+          ctx.fillRect(px,py,1,1);
+        }
+      }
+    }
     ctx.fillStyle = mortar;
     ctx.fillRect(x0,y0+y,TILE,1);
-    const offset = (row%2===0)?0:4;
-    for(let x=offset;x<TILE;x+=8){
-      ctx.fillStyle = mortar;
-      ctx.fillRect(x0+x,y0+y,1,4);
-    }
+    for(let bx=offset; bx<TILE; bx+=brickW) ctx.fillRect(x0+bx,y0+y,1,brickH);
     row++;
   }
 }
 function drawWater(ctx,x0,y0){
   fillTile(ctx,x0,y0,0x3a6fd8);
-  speckle(ctx,x0,y0,0x3a6fd8,40,16);
-  for(let i=0;i<3;i++){
-    const y = y0+Math.floor(Math.random()*TILE);
+  speckle(ctx,x0,y0,0x3a6fd8,Math.round(TILE*TILE*0.15),16);
+  for(let i=0;i<5;i++){
+    const y0r = Math.random()*TILE, amp = 1.5;
     ctx.fillStyle = shadeStr(0x3a6fd8,1.25,6);
-    ctx.fillRect(x0,y,TILE,1);
+    for(let x=0;x<TILE;x++){
+      const yy = Math.round(y0r+Math.sin(x*0.5+i)*amp+TILE)%TILE;
+      ctx.fillRect(x0+x,y0+yy,1,1);
+    }
   }
 }
 function drawWindowFrame(ctx,x0,y0,glassHex){
   fillTile(ctx,x0,y0,glassHex);
-  speckle(ctx,x0,y0,glassHex,16,8);
+  speckle(ctx,x0,y0,glassHex,Math.round(TILE*TILE*0.06),8);
+  ctx.fillStyle = shadeStr(glassHex,1.3,4);
+  for(let i=0;i<TILE*1.3;i++){
+    const x = i, y = Math.round(i-TILE*0.3);
+    if(y>=0 && y<TILE && x<TILE) ctx.fillRect(x0+x,y0+y,1,1);
+  }
   const frame = shadeStr(0x6b4a2b,1,4);
+  const fw = Math.max(2,Math.round(TILE/8));
   ctx.fillStyle = frame;
-  ctx.fillRect(x0,y0,TILE,2); ctx.fillRect(x0,y0+TILE-2,TILE,2);
-  ctx.fillRect(x0,y0,2,TILE); ctx.fillRect(x0+TILE-2,y0,2,TILE);
-  ctx.fillRect(x0+TILE/2-1,y0,2,TILE); ctx.fillRect(x0,y0+TILE/2-1,TILE,2);
+  ctx.fillRect(x0,y0,TILE,fw); ctx.fillRect(x0,y0+TILE-fw,TILE,fw);
+  ctx.fillRect(x0,y0,fw,TILE); ctx.fillRect(x0+TILE-fw,y0,fw,TILE);
+  ctx.fillRect(x0+TILE/2-fw/2,y0,fw,TILE); ctx.fillRect(x0,y0+TILE/2-fw/2,TILE,fw);
 }
 function drawWindow(ctx,x0,y0){ drawWindowFrame(ctx,x0,y0,0xbfe4f0); }
 function drawWindowOpen(ctx,x0,y0){ drawWindowFrame(ctx,x0,y0,0xe8f6fb); }
 function drawDoor(ctx,x0,y0){
   fillTile(ctx,x0,y0,0x8a5a34);
-  speckle(ctx,x0,y0,0x8a5a34,30,8);
+  speckle(ctx,x0,y0,0x8a5a34,Math.round(TILE*TILE*0.12),8);
+  for(let i=0;i<6;i++){
+    const gy = y0+2+Math.random()*(TILE-4);
+    ctx.fillStyle = shadeStr(0x8a5a34,0.8,4);
+    ctx.fillRect(x0+2+Math.random()*(TILE-8),gy,4+Math.random()*4,1);
+  }
   const dark = shadeStr(0x5a3a20,1,4);
   ctx.fillStyle = dark;
-  ctx.fillRect(x0+TILE/2-1,y0+1,2,TILE-2);
-  ctx.fillRect(x0+1,y0+1,TILE-2,1);
-  ctx.fillRect(x0+1,y0+TILE-2,TILE-2,1);
+  ctx.fillRect(x0+TILE/2-1,y0+2,2,TILE-4);
+  ctx.fillRect(x0+2,y0+2,TILE-4,2);
+  ctx.fillRect(x0+2,y0+TILE-4,TILE-4,2);
+  ctx.fillRect(x0+5,y0+6,TILE/2-8,TILE*0.3);
+  ctx.fillRect(x0+TILE/2+3,y0+6,TILE/2-8,TILE*0.3);
+  ctx.fillRect(x0+5,y0+TILE*0.5,TILE/2-8,TILE*0.3);
+  ctx.fillRect(x0+TILE/2+3,y0+TILE*0.5,TILE/2-8,TILE*0.3);
   ctx.fillStyle = shadeStr(0xd9c060,1,4);
-  ctx.fillRect(x0+TILE/2+3,y0+TILE/2,2,2);
+  ctx.fillRect(x0+TILE/2+5,y0+TILE/2,3,3);
 }
 function drawDoorOpen(ctx,x0,y0){
   // faded/ghosted look signals "passable", matching how it renders semi-transparent in-world
   fillTile(ctx,x0,y0,0x8a5a34);
-  speckle(ctx,x0,y0,0x8a5a34,14,6);
+  speckle(ctx,x0,y0,0x8a5a34,Math.round(TILE*TILE*0.06),6);
   const dark = shadeStr(0x5a3a20,1,4);
   ctx.fillStyle = dark;
-  ctx.fillRect(x0+1,y0+1,TILE-2,1);
-  ctx.fillRect(x0+1,y0+TILE-2,TILE-2,1);
+  ctx.fillRect(x0+2,y0+2,TILE-4,2);
+  ctx.fillRect(x0+2,y0+TILE-4,TILE-4,2);
 }
 function drawSapling(ctx,x0,y0){
   fillTile(ctx,x0,y0,0x5b8a3a);
   ctx.fillStyle = shadeStr(0x3a5c22,1,4);
-  ctx.fillRect(x0+7,y0+9,2,7);
+  ctx.fillRect(x0+TILE/2-1,y0+TILE*0.28,3,TILE*0.5);
+  for(let i=0;i<4;i++) blob(ctx, x0+TILE*0.35+Math.random()*TILE*0.3, y0+TILE*0.2+Math.random()*TILE*0.3, TILE*0.14, 0x74b84a, 10);
   ctx.fillStyle = shadeStr(0x74b84a,1,10);
-  for(let i=0;i<40;i++){
-    const px = x0+2+Math.floor(Math.random()*12);
-    const py = y0+2+Math.floor(Math.random()*10);
+  for(let i=0;i<TILE*2.5;i++){
+    const px = x0+TILE*0.15+Math.floor(Math.random()*TILE*0.7);
+    const py = y0+TILE*0.15+Math.floor(Math.random()*TILE*0.6);
     ctx.fillRect(px,py,1,1);
   }
 }
 function drawFlint(ctx,x0,y0){
   fillTile(ctx,x0,y0,0x3a3d42);
-  speckle(ctx,x0,y0,0x3a3d42,50,14);
-  // a few sharp lighter facets to read as "knapped stone" rather than plain rock
+  speckle(ctx,x0,y0,0x3a3d42,Math.round(TILE*TILE*0.18),14);
   const facet = shadeStr(0x8a90a0,1,10);
   ctx.fillStyle = facet;
-  ctx.fillRect(x0+3,y0+3,5,2);
-  ctx.fillRect(x0+8,y0+7,4,2);
-  ctx.fillRect(x0+4,y0+11,6,2);
+  ctx.fillRect(x0+TILE*0.2,y0+TILE*0.18,TILE*0.3,3);
+  ctx.fillRect(x0+TILE*0.5,y0+TILE*0.42,TILE*0.25,3);
+  ctx.fillRect(x0+TILE*0.25,y0+TILE*0.68,TILE*0.35,3);
   ctx.fillStyle = shadeStr(0x1c1e22,1,6);
-  ctx.fillRect(x0+9,y0+3,3,2);
-  ctx.fillRect(x0+2,y0+8,3,2);
+  ctx.fillRect(x0+TILE*0.55,y0+TILE*0.18,TILE*0.2,3);
+  ctx.fillRect(x0+TILE*0.12,y0+TILE*0.48,TILE*0.2,3);
 }
 function drawFire(ctx,x0,y0){
   // drawn on a near-black base — combined with the glass bucket's transparency this reads as
   // flickering flame rather than a solid tile
   fillTile(ctx,x0,y0,0x120600);
-  ctx.fillStyle = '#c62b0e';
-  ctx.fillRect(x0+3,y0+9,10,6);
-  ctx.fillRect(x0+4,y0+6,8,4);
-  ctx.fillStyle = '#ff7a1a';
-  ctx.fillRect(x0+5,y0+7,6,6);
-  ctx.fillRect(x0+6,y0+4,4,4);
-  ctx.fillStyle = '#ffce4d';
-  ctx.fillRect(x0+6,y0+9,4,4);
-  ctx.fillRect(x0+7,y0+5,2,3);
-  speckle(ctx,x0,y0,0xff7a1a,10,20);
+  for(let i=0;i<3;i++) blob(ctx, x0+TILE*0.3+Math.random()*TILE*0.4, y0+TILE*0.55+Math.random()*TILE*0.3, TILE*0.24, 0xc62b0e, 20);
+  for(let i=0;i<3;i++) blob(ctx, x0+TILE*0.32+Math.random()*TILE*0.36, y0+TILE*0.35+Math.random()*TILE*0.25, TILE*0.18, 0xff7a1a, 24);
+  for(let i=0;i<2;i++) blob(ctx, x0+TILE*0.4+Math.random()*TILE*0.2, y0+TILE*0.18+Math.random()*TILE*0.18, TILE*0.12, 0xffce4d, 20);
+  for(let i=0;i<TILE*0.6;i++){
+    const px=x0+Math.floor(Math.random()*TILE), py=y0+Math.floor(Math.random()*TILE*0.5);
+    ctx.fillStyle = shadeStr(0xffb066,1,10);
+    ctx.fillRect(px,py,1,1);
+  }
 }
 function drawTorch(ctx,x0,y0){
   // near-black base + the glass bucket's transparency reads as a thin stick rather than a solid cube
   fillTile(ctx,x0,y0,0x0a0a0a);
   ctx.fillStyle = shadeStr(0x6b4a2b,1,6);
-  ctx.fillRect(x0+7,y0+8,2,7);
-  ctx.fillStyle = '#c62b0e';
-  ctx.fillRect(x0+5,y0+4,6,5);
-  ctx.fillStyle = '#ff9a2e';
-  ctx.fillRect(x0+6,y0+2,4,4);
+  ctx.fillRect(x0+TILE/2-1,y0+TILE*0.48,3,TILE*0.45);
+  for(let i=0;i<3;i++){
+    ctx.fillStyle = shadeStr(0x4a3018,1,4);
+    ctx.fillRect(x0+TILE/2-1,y0+TILE*0.5+i*TILE*0.12,3,1);
+  }
+  for(let i=0;i<2;i++) blob(ctx, x0+TILE*0.4+Math.random()*TILE*0.2, y0+TILE*0.28+Math.random()*TILE*0.15, TILE*0.13, 0xc62b0e, 14);
+  for(let i=0;i<2;i++) blob(ctx, x0+TILE*0.42+Math.random()*TILE*0.16, y0+TILE*0.16+Math.random()*TILE*0.12, TILE*0.09, 0xff9a2e, 16);
   ctx.fillStyle = '#ffd75e';
-  ctx.fillRect(x0+7,y0+1,2,3);
+  ctx.fillRect(x0+TILE/2-1,y0+TILE*0.04,2,TILE*0.1);
 }
 function buildAtlas(){
   const canvas = document.createElement('canvas');
