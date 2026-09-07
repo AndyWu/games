@@ -16,6 +16,7 @@ const FAR = 400;
 
 const AIR=0, GRASS=1, DIRT=2, STONE=3, SAND=4, WOOD=5, LEAVES=6, PLANKS=7, WATER=8, BEDROCK=9;
 const CRAFTING_TABLE=10, BRICKS=11, STICK=12;
+const WINDOW=13, WINDOW_OPEN=14, DOOR=15, DOOR_OPEN=16;
 
 const BLOCK_COLOR = {
   [GRASS]:  0x5b8a3a,
@@ -30,14 +31,23 @@ const BLOCK_COLOR = {
   [CRAFTING_TABLE]: 0xa5652f,
   [BRICKS]: 0x9a4a3a,
   [STICK]:  0xc9a06b,
+  [WINDOW]: 0xbfe4f0,
+  [WINDOW_OPEN]: 0xdff3fa,
+  [DOOR]: 0x8a5a34,
+  [DOOR_OPEN]: 0xa8815a,
 };
 const BLOCK_NAME = {
   [GRASS]:'Grass', [DIRT]:'Dirt', [STONE]:'Stone', [SAND]:'Sand', [WOOD]:'Wood',
   [LEAVES]:'Leaves', [PLANKS]:'Planks', [WATER]:'Water',
   [CRAFTING_TABLE]:'Crafting Table', [BRICKS]:'Bricks', [STICK]:'Stick',
+  [WINDOW]:'Window', [WINDOW_OPEN]:'Window (open)', [DOOR]:'Door', [DOOR_OPEN]:'Door (open)',
 };
-const HOTBAR = [GRASS, DIRT, STONE, SAND, WOOD, LEAVES, PLANKS, WATER, CRAFTING_TABLE, BRICKS];
-const COLLECTIBLE = new Set([GRASS, DIRT, STONE, SAND, WOOD, LEAVES, PLANKS, CRAFTING_TABLE, BRICKS]);
+const HOTBAR = [GRASS, DIRT, STONE, SAND, WOOD, LEAVES, PLANKS, WATER, CRAFTING_TABLE, BRICKS, WINDOW, DOOR];
+// Blocks with an open/closed state: right-clicking one toggles it to the other id in this map.
+const TOGGLE_MAP = { [WINDOW]:WINDOW_OPEN, [WINDOW_OPEN]:WINDOW, [DOOR]:DOOR_OPEN, [DOOR_OPEN]:DOOR };
+// Breaking the open form of a toggleable block gives you back its closed (placeable) form.
+const COLLECT_AS = { [WINDOW_OPEN]:WINDOW, [DOOR_OPEN]:DOOR };
+const COLLECTIBLE = new Set([GRASS, DIRT, STONE, SAND, WOOD, LEAVES, PLANKS, CRAFTING_TABLE, BRICKS, WINDOW, WINDOW_OPEN, DOOR, DOOR_OPEN]);
 
 // ---------- Health / combat ----------
 const HP_PER_HEART = 2;
@@ -59,16 +69,26 @@ const FALL_DAMAGE_FREE_BLOCKS = 3; // first 3 blocks of any fall are damage-free
 const ANIMAL_TYPES = ['cow','sheep','dog','giraffe','lion','elephant','trex','raptor'];
 const PREY_TYPES = ['cow','sheep','dog','giraffe','lion','elephant']; // huntable by predators
 const ANIMAL_STATS = {
-  sheep:    { maxHp: 3*HP_PER_HEART,  dmg:0, retaliate:false, aggressive:false, speed:1.0, chaseSpeed:1.8 },
-  dog:      { maxHp: 4*HP_PER_HEART,  dmg:1, retaliate:true,  aggressive:false, speed:1.4, chaseSpeed:3.4 },
-  cow:      { maxHp: 5*HP_PER_HEART,  dmg:0, retaliate:false, aggressive:false, speed:0.9, chaseSpeed:1.6 },
-  giraffe:  { maxHp: 8*HP_PER_HEART,  dmg:3, retaliate:true,  aggressive:false, speed:1.1, chaseSpeed:2.6 },
-  lion:     { maxHp: 10*HP_PER_HEART, dmg:4, retaliate:true,  aggressive:true,  speed:1.2, chaseSpeed:3.8 },
-  elephant: { maxHp: 20*HP_PER_HEART, dmg:6, retaliate:true,  aggressive:true,  speed:0.8, chaseSpeed:2.4 },
-  trex:     { maxHp: 30*HP_PER_HEART, dmg:8, retaliate:true,  aggressive:true,  predator:true, speed:1.0, chaseSpeed:3.2 },
-  raptor:   { maxHp: 5*HP_PER_HEART,  dmg:2, retaliate:true,  aggressive:true,  predator:true, pack:true, jump:true, speed:1.6, chaseSpeed:5.2 },
+  sheep:    { maxHp: 3*HP_PER_HEART,  dmg:0, retaliate:false, aggressive:false, speed:1.0, chaseSpeed:1.8, reach:0 },
+  dog:      { maxHp: 4*HP_PER_HEART,  dmg:1, retaliate:true,  aggressive:false, speed:1.4, chaseSpeed:3.4, reach:0.15 },
+  cow:      { maxHp: 5*HP_PER_HEART,  dmg:0, retaliate:false, aggressive:false, speed:0.9, chaseSpeed:1.6, reach:0 },
+  giraffe:  { maxHp: 8*HP_PER_HEART,  dmg:3, retaliate:true,  aggressive:false, speed:1.1, chaseSpeed:2.6, reach:0.8 },
+  lion:     { maxHp: 10*HP_PER_HEART, dmg:4, retaliate:true,  aggressive:true,  speed:1.2, chaseSpeed:3.8, reach:0.4 },
+  elephant: { maxHp: 20*HP_PER_HEART, dmg:6, retaliate:true,  aggressive:true,  speed:0.8, chaseSpeed:2.4, reach:2.0 },
+  trex:     { maxHp: 30*HP_PER_HEART, dmg:8, retaliate:true,  aggressive:true,  predator:true, speed:1.0, chaseSpeed:3.2, reach:3.5 },
+  raptor:   { maxHp: 5*HP_PER_HEART,  dmg:2, retaliate:true,  aggressive:true,  predator:true, pack:true, jump:true, speed:1.6, chaseSpeed:5.2, reach:0.1 },
 };
 const PREDATOR_DETECT_RADIUS = 14;
+
+// ---------- Real-world scale ----------
+// Each animal's model was originally built at an arbitrary "looks right together" size. These are
+// the real (or, for the dinosaurs, best paleontological-estimate) shoulder/hip heights in meters —
+// world units are ~1 unit = 1 meter throughout (the player is 1.8 units tall). ANIMAL_SCALE is
+// derived once below by comparing this target height to each model's original bodyY.
+const ANIMAL_REAL_HEIGHT = {
+  sheep: 0.8, dog: 0.58, cow: 1.4, giraffe: 3.0,
+  lion: 1.2, elephant: 3.3, trex: 3.8, raptor: 0.5,
+};
 const PREDATOR_DEAGGRO_RADIUS = 22;
 
 // ---------- Crafting ----------
@@ -77,6 +97,8 @@ const RECIPES = [
   { name:'Sticks',         out:{id:STICK, qty:4},          in:[{id:PLANKS, qty:2}] },
   { name:'Crafting Table', out:{id:CRAFTING_TABLE, qty:1}, in:[{id:PLANKS, qty:4}] },
   { name:'Bricks',         out:{id:BRICKS, qty:4},         in:[{id:STONE, qty:4}] },
+  { name:'Window',         out:{id:WINDOW, qty:1},         in:[{id:SAND, qty:2}] },
+  { name:'Door',           out:{id:DOOR, qty:1},            in:[{id:PLANKS, qty:3}] },
 ];
 const inventory = {};
 function invCount(id){ return inventory[id]||0; }
@@ -105,9 +127,10 @@ function nearestCraftingTable(maxDist){
 }
 
 // ---------- Texture atlas (procedurally drawn pixel-art, no external image assets) ----------
-const TILE = 16, ATLAS_COLS = 4, ATLAS_ROWS = 4;
+const TILE = 16, ATLAS_COLS = 4, ATLAS_ROWS = 5;
 const T_GRASS_TOP=0, T_GRASS_SIDE=1, T_DIRT=2, T_STONE=3, T_SAND=4, T_LOG_SIDE=5, T_LOG_TOP=6,
-      T_LEAVES=7, T_PLANKS=8, T_BEDROCK=9, T_CRAFT_TOP=10, T_CRAFT_SIDE=11, T_BRICKS=12, T_WATER=13;
+      T_LEAVES=7, T_PLANKS=8, T_BEDROCK=9, T_CRAFT_TOP=10, T_CRAFT_SIDE=11, T_BRICKS=12, T_WATER=13,
+      T_WINDOW=14, T_WINDOW_OPEN=15, T_DOOR=16, T_DOOR_OPEN=17;
 
 function hexRGB(hex){ return [(hex>>16)&255, (hex>>8)&255, hex&255]; }
 function rgbStr(r,g,b){ return `rgb(${r|0},${g|0},${b|0})`; }
@@ -254,13 +277,45 @@ function drawWater(ctx,x0,y0){
     ctx.fillRect(x0,y,TILE,1);
   }
 }
+function drawWindowFrame(ctx,x0,y0,glassHex){
+  fillTile(ctx,x0,y0,glassHex);
+  speckle(ctx,x0,y0,glassHex,16,8);
+  const frame = shadeStr(0x6b4a2b,1,4);
+  ctx.fillStyle = frame;
+  ctx.fillRect(x0,y0,TILE,2); ctx.fillRect(x0,y0+TILE-2,TILE,2);
+  ctx.fillRect(x0,y0,2,TILE); ctx.fillRect(x0+TILE-2,y0,2,TILE);
+  ctx.fillRect(x0+TILE/2-1,y0,2,TILE); ctx.fillRect(x0,y0+TILE/2-1,TILE,2);
+}
+function drawWindow(ctx,x0,y0){ drawWindowFrame(ctx,x0,y0,0xbfe4f0); }
+function drawWindowOpen(ctx,x0,y0){ drawWindowFrame(ctx,x0,y0,0xe8f6fb); }
+function drawDoor(ctx,x0,y0){
+  fillTile(ctx,x0,y0,0x8a5a34);
+  speckle(ctx,x0,y0,0x8a5a34,30,8);
+  const dark = shadeStr(0x5a3a20,1,4);
+  ctx.fillStyle = dark;
+  ctx.fillRect(x0+TILE/2-1,y0+1,2,TILE-2);
+  ctx.fillRect(x0+1,y0+1,TILE-2,1);
+  ctx.fillRect(x0+1,y0+TILE-2,TILE-2,1);
+  ctx.fillStyle = shadeStr(0xd9c060,1,4);
+  ctx.fillRect(x0+TILE/2+3,y0+TILE/2,2,2);
+}
+function drawDoorOpen(ctx,x0,y0){
+  // faded/ghosted look signals "passable", matching how it renders semi-transparent in-world
+  fillTile(ctx,x0,y0,0x8a5a34);
+  speckle(ctx,x0,y0,0x8a5a34,14,6);
+  const dark = shadeStr(0x5a3a20,1,4);
+  ctx.fillStyle = dark;
+  ctx.fillRect(x0+1,y0+1,TILE-2,1);
+  ctx.fillRect(x0+1,y0+TILE-2,TILE-2,1);
+}
 function buildAtlas(){
   const canvas = document.createElement('canvas');
   canvas.width = TILE*ATLAS_COLS;
   canvas.height = TILE*ATLAS_ROWS;
   const ctx = canvas.getContext('2d');
   const draw = [drawGrassTop, drawGrassSide, drawDirt, drawStone, drawSand, drawLogSide, drawLogTop,
-                drawLeaves, drawPlanks, drawBedrock, drawCraftTop, drawCraftSide, drawBricks, drawWater];
+                drawLeaves, drawPlanks, drawBedrock, drawCraftTop, drawCraftSide, drawBricks, drawWater,
+                drawWindow, drawWindowOpen, drawDoor, drawDoorOpen];
   draw.forEach((fn, i)=> fn(ctx, (i%ATLAS_COLS)*TILE, Math.floor(i/ATLAS_COLS)*TILE));
   const tex = new THREE.CanvasTexture(canvas);
   tex.magFilter = THREE.NearestFilter;
@@ -289,6 +344,10 @@ const BLOCK_TILES = {
   [BEDROCK]:{top:T_BEDROCK, side:T_BEDROCK, bottom:T_BEDROCK},
   [CRAFTING_TABLE]: {top:T_CRAFT_TOP, side:T_CRAFT_SIDE, bottom:T_PLANKS},
   [BRICKS]: {top:T_BRICKS, side:T_BRICKS, bottom:T_BRICKS},
+  [WINDOW]: {top:T_WINDOW, side:T_WINDOW, bottom:T_WINDOW},
+  [WINDOW_OPEN]: {top:T_WINDOW_OPEN, side:T_WINDOW_OPEN, bottom:T_WINDOW_OPEN},
+  [DOOR]: {top:T_DOOR, side:T_DOOR, bottom:T_DOOR},
+  [DOOR_OPEN]: {top:T_DOOR_OPEN, side:T_DOOR_OPEN, bottom:T_DOOR_OPEN},
 };
 // per-face-direction UV winding (0/1 flags select u0/u1 and vBottom/vTop), aligned to FACES order below
 const UV_PATTERNS = [
@@ -470,25 +529,35 @@ const FACES = [
 const atlasTexture = buildAtlas();
 const solidMaterial = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide, map: atlasTexture });
 const waterMaterial = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide, map: atlasTexture, transparent:true, opacity:0.75 });
+// Shared by every other see-through block (windows, an open door) -- a neutral, un-tinted glass
+// material so their own texture supplies the color, unlike water's blue-tinted one.
+const glassMaterial = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide, map: atlasTexture, transparent:true, opacity:0.65 });
+// Any block that isn't fully opaque. A face between two blocks of the SAME transparent type is
+// skipped (no point rendering the seam between two adjacent water or window blocks); a face against
+// a *different* transparent type, or against AIR, still draws.
+const TRANSPARENT_BLOCKS = new Set([WATER, WINDOW, WINDOW_OPEN, DOOR_OPEN]);
+function bucketFor(b){ return b===WATER ? 'water' : (TRANSPARENT_BLOCKS.has(b) ? 'glass' : 'solid'); }
 
 function buildChunkGeometries(cx,cz){
-  const solid = {positions:[],normals:[],colors:[],uvs:[],indices:[]};
-  const water = {positions:[],normals:[],colors:[],uvs:[],indices:[]};
+  const buckets = {
+    solid: {positions:[],normals:[],colors:[],uvs:[],indices:[]},
+    water: {positions:[],normals:[],colors:[],uvs:[],indices:[]},
+    glass: {positions:[],normals:[],colors:[],uvs:[],indices:[]},
+  };
   const x0=cx*CHUNK_SIZE, z0=cz*CHUNK_SIZE;
   for(let x=x0;x<x0+CHUNK_SIZE;x++){
     for(let z=z0;z<z0+CHUNK_SIZE;z++){
       for(let y=0;y<WORLD_HEIGHT;y++){
         const b = getBlock(x,y,z);
         if(b===AIR) continue;
-        const isWater = b===WATER;
-        const bucket = isWater ? water : solid;
+        const bucket = buckets[bucketFor(b)];
         const tiles = BLOCK_TILES[b];
         for(let fi=0; fi<FACES.length; fi++){
           const f = FACES[fi];
           const nb = getBlock(x+f.n[0], y+f.n[1], z+f.n[2]);
           let draw;
           if(nb===AIR) draw = true;
-          else if(nb===WATER && !isWater) draw = true;
+          else if(TRANSPARENT_BLOCKS.has(nb) && nb!==b) draw = true;
           else draw = false;
           if(!draw) continue;
           const shadeF = f.n[1]===1 ? 1.0 : (f.n[1]===-1 ? 0.5 : 0.75);
@@ -519,20 +588,22 @@ function buildChunkGeometries(cx,cz){
     geo.setIndex(bucket.indices);
     return geo;
   }
-  return { solid: toGeo(solid), water: toGeo(water) };
+  return { solid: toGeo(buckets.solid), water: toGeo(buckets.water), glass: toGeo(buckets.glass) };
 }
 
 function rebuildChunk(cx,cz){
   const key = chunkKey(cx,cz);
   const existing = chunkMeshes.get(key);
   if(existing){
-    if(existing.solid){ scene.remove(existing.solid); existing.solid.geometry.dispose(); }
-    if(existing.water){ scene.remove(existing.water); existing.water.geometry.dispose(); }
+    ['solid','water','glass'].forEach(k=>{
+      if(existing[k]){ scene.remove(existing[k]); existing[k].geometry.dispose(); }
+    });
   }
-  const { solid, water } = buildChunkGeometries(cx,cz);
+  const { solid, water, glass } = buildChunkGeometries(cx,cz);
   const entry = {};
   if(solid){ const m = new THREE.Mesh(solid, solidMaterial); scene.add(m); entry.solid = m; }
   if(water){ const m = new THREE.Mesh(water, waterMaterial); scene.add(m); entry.water = m; }
+  if(glass){ const m = new THREE.Mesh(glass, glassMaterial); scene.add(m); entry.glass = m; }
   chunkMeshes.set(key, entry);
 }
 function rebuildAllChunks(){
@@ -940,7 +1011,17 @@ const ANIMAL_BUILDERS = {
     });
   },
 };
-function createAnimalMesh(type){ return ANIMAL_BUILDERS[type](); }
+// Original bodyY (quadrupeds) / hip height (bipeds) each model was designed at, before rescaling.
+const ANIMAL_ORIGINAL_BODY_Y = {
+  cow:0.75, sheep:0.5, dog:0.4, giraffe:1.5, lion:0.65, elephant:1.0, trex:1.65, raptor:0.85,
+};
+const ANIMAL_SCALE = {};
+for(const type of ANIMAL_TYPES) ANIMAL_SCALE[type] = ANIMAL_REAL_HEIGHT[type] / ANIMAL_ORIGINAL_BODY_Y[type];
+function createAnimalMesh(type){
+  const mesh = ANIMAL_BUILDERS[type]();
+  mesh.scale.setScalar(ANIMAL_SCALE[type]);
+  return mesh;
+}
 function animateQuadrupedWalk(group, state, dt, moving, speedMul){
   state.amp += ((moving?1:0) - state.amp) * Math.min(1, dt*8);
   state.phase += dt * 6 * (speedMul||1);
@@ -954,7 +1035,7 @@ function animateQuadrupedWalk(group, state, dt, moving, speedMul){
 const animals = [];
 // Ground for animals excludes tree material (WOOD/LEAVES) so they never end up standing in a
 // tree's trunk or canopy — only natural terrain and player-built blocks count as "ground".
-function isAnimalGround(b){ return b!==AIR && b!==WATER && b!==WOOD && b!==LEAVES; }
+function isAnimalGround(b){ return b!==AIR && b!==WATER && b!==WOOD && b!==LEAVES && b!==WINDOW_OPEN && b!==DOOR_OPEN; }
 function groundHeightAt(x,z){
   const bx=Math.floor(x), bz=Math.floor(z);
   for(let y=WORLD_HEIGHT-1;y>=0;y--){
@@ -962,34 +1043,62 @@ function groundHeightAt(x,z){
   }
   return 1;
 }
+const SPAWN_COUNTS = { cow:4, sheep:5, dog:3, giraffe:3, lion:2, elephant:2, trex:1, raptor:3 };
+function findSpawnSpot(seedX, seedZ){
+  let x,z,h,tries=0;
+  do{
+    const hx = seedX!=null ? hash2(seedX+tries*0.37, seedZ) : Math.random();
+    const hz = seedX!=null ? hash2(seedX, seedZ+tries*0.53) : Math.random();
+    x = 4 + Math.floor(hx*(WORLD_SIZE-8));
+    z = 4 + Math.floor(hz*(WORLD_SIZE-8));
+    h = heightAt(x,z);
+    tries++;
+  } while((h<=SEA_LEVEL || getBlock(x,h,z)!==GRASS || getBlock(x,h+1,z)!==AIR) && tries<30);
+  return {x,z};
+}
+function addAnimal(type, id, spot, yawSeed){
+  const stats = ANIMAL_STATS[type];
+  const mesh = createAnimalMesh(type);
+  const gy = groundHeightAt(spot.x+0.5, spot.z+0.5);
+  mesh.position.set(spot.x+0.5, gy, spot.z+0.5);
+  scene.add(mesh);
+  const a = {
+    id, type, mesh,
+    hp: stats.maxHp, maxHp: stats.maxHp,
+    x:spot.x+0.5, y:gy, z:spot.z+0.5, yaw: (yawSeed!=null ? yawSeed : Math.random())*Math.PI*2,
+    wanderTimer: Math.random()*2, target:null,
+    aggroUntil:0, attackCooldown:0, walk:{phase:0,amp:0}, wasAggro:false,
+    predTarget:null, hopPhase:0, wasPredTarget:false, fedUntil:0,
+  };
+  animals.push(a);
+  return a;
+}
 function spawnAnimals(){
-  const counts = { cow:4, sheep:5, dog:3, giraffe:3, lion:2, elephant:2, trex:1, raptor:3 };
   let idx=0;
   for(const type of ANIMAL_TYPES){
-    for(let i=0;i<counts[type];i++){
-      let x,z,h,tries=0;
-      do{
-        const hx = hash2(idx*7.13+1.7, idx*3.91+5.2+tries*0.37);
-        const hz = hash2(idx*11.3+2.9+tries*0.53, idx*4.77+8.1);
-        x = 4 + Math.floor(hx*(WORLD_SIZE-8));
-        z = 4 + Math.floor(hz*(WORLD_SIZE-8));
-        h = heightAt(x,z);
-        tries++;
-      } while((h<=SEA_LEVEL || getBlock(x,h,z)!==GRASS || getBlock(x,h+1,z)!==AIR) && tries<30);
-      const stats = ANIMAL_STATS[type];
-      const mesh = createAnimalMesh(type);
-      const gy = groundHeightAt(x+0.5, z+0.5);
-      mesh.position.set(x+0.5, gy, z+0.5);
-      scene.add(mesh);
-      animals.push({
-        id: type+'_'+idx, type, mesh,
-        hp: stats.maxHp, maxHp: stats.maxHp,
-        x:x+0.5, y:gy, z:z+0.5, yaw: hash2(idx*2.1,idx*5.7)*Math.PI*2,
-        wanderTimer: hash2(idx*3.3,idx*1.1)*2, target:null,
-        aggroUntil:0, attackCooldown:0, walk:{phase:0,amp:0}, wasAggro:false,
-        predTarget:null, hopPhase:0,
-      });
+    for(let i=0;i<SPAWN_COUNTS[type];i++){
+      const spot = findSpawnSpot(idx*7.13+1.7, idx*11.3+2.9);
+      addAnimal(type, type+'_'+idx, spot, hash2(idx*2.1,idx*5.7));
       idx++;
+    }
+  }
+}
+let respawnCheckTimer = 8;
+function newRespawnId(type){
+  // Random, not an incrementing counter: a per-session counter would start at 0 on every client
+  // and could collide with another player's respawned animal, corrupting each other's HP via the
+  // shared world/mobs sync. This is astronomically unlikely to collide across clients.
+  return type+'_r'+Math.random().toString(36).slice(2,10);
+}
+function updateRespawns(dt){
+  respawnCheckTimer -= dt;
+  if(respawnCheckTimer>0) return;
+  respawnCheckTimer = 8; // check periodically, replace at most one missing animal per type each time
+  for(const type of ANIMAL_TYPES){
+    const alive = animals.reduce((n,a)=> a.type===type ? n+1 : n, 0);
+    if(alive < SPAWN_COUNTS[type]){
+      addAnimal(type, newRespawnId(type), findSpawnSpot());
+      break; // one new animal per check keeps respawns feeling gradual, not a sudden burst
     }
   }
 }
@@ -1012,7 +1121,7 @@ function updateAnimal(a, dt){
     if(distToPlayer > 0.05){
       const nx = dxp/distToPlayer, nz = dzp/distToPlayer;
       a.yaw = Math.atan2(-nx, -nz);
-      if(distToPlayer > ATTACK_RANGE*0.4){
+      if(distToPlayer > ATTACK_RANGE*0.4 + stats.reach){
         a.x += nx*stats.chaseSpeed*dt;
         a.z += nz*stats.chaseSpeed*dt;
         moving = true;
@@ -1067,13 +1176,55 @@ function findPredatorTarget(a){
 function isPredTargetInvalid(t){
   return t.type==='animal' && !animals.includes(t.ref);
 }
+const SATIATION_MS = 45000; // after a kill, a predator stops hunting for this long
 function predatorDamageAnimal(a, dmg){
   a.hp = Math.max(0, a.hp - dmg);
   if(fbReady) db.ref('world/mobs/'+a.id+'/hp').set(a.hp);
   if(a.hp<=0){ SFX.animalDeath(); killAnimal(a); }
 }
+function wanderStep(a, stats, dt, speedMul){
+  let moving = false;
+  a.wanderTimer -= dt;
+  if(a.wanderTimer<=0){
+    a.wanderTimer = 2+Math.random()*3;
+    a.target = Math.random()<0.6
+      ? { x:a.x+(Math.random()*2-1)*4, z:a.z+(Math.random()*2-1)*4 }
+      : null;
+  }
+  if(a.target){
+    const tdx=a.target.x-a.x, tdz=a.target.z-a.z, td=Math.hypot(tdx,tdz);
+    if(td>0.15){
+      const nx=tdx/td, nz=tdz/td;
+      a.yaw = Math.atan2(-nx,-nz);
+      a.x += nx*stats.speed*dt*(speedMul||0.6);
+      a.z += nz*stats.speed*dt*(speedMul||0.6);
+      moving = true;
+    } else a.target = null;
+  }
+  return moving;
+}
+function placeGrounded(a, dt, jumping){
+  a.x = Math.max(1, Math.min(WORLD_SIZE-1, a.x));
+  a.z = Math.max(1, Math.min(WORLD_SIZE-1, a.z));
+  const groundY = groundHeightAt(a.x, a.z);
+  a.hopPhase += jumping ? dt*7 : 0;
+  const hop = jumping ? Math.max(0, Math.sin(a.hopPhase))*0.55 : 0;
+  a.y = groundY + hop;
+  a.mesh.position.set(a.x, a.y, a.z);
+  a.mesh.rotation.y = a.yaw;
+}
 function updatePredator(a, stats, dt){
   a.attackCooldown = Math.max(0, a.attackCooldown - dt);
+  const now = performance.now();
+
+  if(now < (a.fedUntil||0)){
+    // just ate -- stop hunting for a while and wander peacefully instead
+    a.predTarget = null;
+    const moving = wanderStep(a, stats, dt);
+    placeGrounded(a, dt, false);
+    animateBipedWalk(a.mesh, a.walk, dt, moving, 1);
+    return;
+  }
 
   if(!a.predTarget && stats.pack){
     const packmate = animals.find(o=>o!==a && o.type===a.type && o.predTarget);
@@ -1082,6 +1233,13 @@ function updatePredator(a, stats, dt){
   if(!a.predTarget || isPredTargetInvalid(a.predTarget)){
     a.predTarget = findPredatorTarget(a);
   }
+
+  const hasTarget = !!a.predTarget;
+  if(hasTarget && !a.wasPredTarget){
+    if(a.type==='trex') SFX.trexRoar();
+    else if(a.type==='raptor') SFX.raptorScreech();
+  }
+  a.wasPredTarget = hasTarget;
 
   let moving = false, jumping = false;
   if(a.predTarget){
@@ -1093,46 +1251,30 @@ function updatePredator(a, stats, dt){
     } else if(dist>0.05){
       const nx=dx/dist, nz=dz/dist;
       a.yaw = Math.atan2(-nx,-nz);
-      if(dist > ATTACK_RANGE*0.4){
+      if(dist > ATTACK_RANGE*0.4 + stats.reach){
         a.x += nx*stats.chaseSpeed*dt;
         a.z += nz*stats.chaseSpeed*dt;
         moving = true;
         if(stats.jump) jumping = true;
       } else if(a.attackCooldown<=0){
-        if(a.predTarget.type==='player') damagePlayer(stats.dmg, a.type);
-        else predatorDamageAnimal(a.predTarget.ref, stats.dmg);
+        if(a.predTarget.type==='player'){
+          damagePlayer(stats.dmg, a.type);
+        } else {
+          const prey = a.predTarget.ref;
+          predatorDamageAnimal(prey, stats.dmg);
+          if(prey.hp<=0){
+            a.fedUntil = now + SATIATION_MS; // ate -- full for a while
+            a.predTarget = null;
+          }
+        }
         a.attackCooldown = stats.pack ? 0.8 : 1.3;
       }
     }
   } else {
-    a.wanderTimer -= dt;
-    if(a.wanderTimer<=0){
-      a.wanderTimer = 2+Math.random()*3;
-      a.target = Math.random()<0.6
-        ? { x:a.x+(Math.random()*2-1)*4, z:a.z+(Math.random()*2-1)*4 }
-        : null;
-    }
-    if(a.target){
-      const tdx=a.target.x-a.x, tdz=a.target.z-a.z, td=Math.hypot(tdx,tdz);
-      if(td>0.15){
-        const nx=tdx/td, nz=tdz/td;
-        a.yaw = Math.atan2(-nx,-nz);
-        a.x += nx*stats.speed*dt*0.6;
-        a.z += nz*stats.speed*dt*0.6;
-        moving = true;
-      } else a.target = null;
-    }
+    moving = wanderStep(a, stats, dt);
   }
 
-  a.x = Math.max(1, Math.min(WORLD_SIZE-1, a.x));
-  a.z = Math.max(1, Math.min(WORLD_SIZE-1, a.z));
-  const groundY = groundHeightAt(a.x, a.z);
-  a.hopPhase += jumping ? dt*7 : 0;
-  const hop = jumping ? Math.max(0, Math.sin(a.hopPhase))*0.55 : 0;
-  a.y = groundY + hop;
-
-  a.mesh.position.set(a.x, a.y, a.z);
-  a.mesh.rotation.y = a.yaw;
+  placeGrounded(a, dt, jumping);
   animateBipedWalk(a.mesh, a.walk, dt, moving, a.predTarget ? 2.2 : 1);
 }
 function updateAnimals(dt){ animals.forEach(a=>updateAnimal(a,dt)); }
@@ -1204,37 +1346,45 @@ function playNoise(duration, volume, filterFreq, attack){
   src.connect(filter).connect(gain).connect(ctx.destination);
   src.start(now);
 }
-// Real recording (public domain, Wikimedia Commons) for the lion roar — loaded once up front;
-// playRoar() falls back to the synthesized growl below if the file can't be fetched/decoded.
-let lionRoarBuffer = null, lionRoarLoadFailed = false;
-function loadLionRoar(){
-  fetch('assets/lion-roar.ogg')
-    .then(r => { if(!r.ok) throw new Error('http '+r.status); return r.arrayBuffer(); })
-    .then(buf => {
-      const ctx = ensureAudio();
-      if(!ctx) throw new Error('no audio context');
-      return new Promise((resolve,reject) => ctx.decodeAudioData(buf, resolve, reject));
-    })
-    .then(decoded => { lionRoarBuffer = decoded; })
-    .catch(() => { lionRoarLoadFailed = true; });
+// Real recordings (public domain / CC-BY-SA, see assets/README.md) for the big predator sounds —
+// loaded once up front; each falls back to a synthesized sound if the file can't be fetched/decoded.
+function makeClipPlayer(url, defaultClipDuration, tailFade){
+  let buffer = null;
+  function load(){
+    fetch(url)
+      .then(r => { if(!r.ok) throw new Error('http '+r.status); return r.arrayBuffer(); })
+      .then(buf => {
+        const ctx = ensureAudio();
+        if(!ctx) throw new Error('no audio context');
+        return new Promise((resolve,reject) => ctx.decodeAudioData(buf, resolve, reject));
+      })
+      .then(decoded => { buffer = decoded; })
+      .catch(() => {});
+  }
+  function play(clipDuration, volume){
+    const ctx = ensureAudio();
+    if(!ctx || !buffer) return false;
+    const now = ctx.currentTime;
+    const dur = Math.min(clipDuration!=null ? clipDuration : defaultClipDuration, buffer.duration);
+    const fade = tailFade!=null ? tailFade : 0.3;
+    const vol = volume!=null ? volume : 0.8;
+    const src = ctx.createBufferSource();
+    src.buffer = buffer;
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(vol, now);
+    gain.gain.setValueAtTime(vol, now + Math.max(0, dur-fade));
+    gain.gain.linearRampToValueAtTime(0.0001, now + dur);
+    src.connect(gain).connect(ctx.destination);
+    src.start(now, 0, dur);
+    return true;
+  }
+  return { load, play };
 }
-function playRealRoar(){
-  const ctx = ensureAudio();
-  if(!ctx || !lionRoarBuffer) return false;
-  const now = ctx.currentTime;
-  const clipDuration = Math.min(2.2, lionRoarBuffer.duration);
-  const src = ctx.createBufferSource();
-  src.buffer = lionRoarBuffer;
-  const gain = ctx.createGain();
-  gain.gain.setValueAtTime(0.8, now);
-  gain.gain.setValueAtTime(0.8, now + Math.max(0, clipDuration-0.35));
-  gain.gain.linearRampToValueAtTime(0.0001, now + clipDuration);
-  src.connect(gain).connect(ctx.destination);
-  src.start(now, 0, clipDuration);
-  return true;
-}
+const lionRoarClip = makeClipPlayer('assets/lion-roar.ogg', 2.2, 0.35);
+const trexRoarClip = makeClipPlayer('assets/trex-roar.ogg', 3.0, 0.4);
+const raptorScreechClip = makeClipPlayer('assets/raptor-screech.mp3', 2.2, 0.15);
 function playRoar(){
-  if(playRealRoar()) return;
+  if(lionRoarClip.play()) return;
   const ctx = ensureAudio();
   if(!ctx) return;
   const now = ctx.currentTime;
@@ -1288,6 +1438,61 @@ function playRoar(){
   lfo.start(now); lfo.stop(now+duration);
   noiseSrc.start(now);
 }
+function playTrexRoarSynth(){
+  const ctx = ensureAudio();
+  if(!ctx) return;
+  const now = ctx.currentTime;
+  const duration = 1.4;
+  const osc = ctx.createOscillator();
+  osc.type = 'sawtooth';
+  osc.frequency.setValueAtTime(50, now);
+  osc.frequency.linearRampToValueAtTime(85, now+0.2);
+  osc.frequency.linearRampToValueAtTime(38, now+duration);
+  const lowpass = ctx.createBiquadFilter();
+  lowpass.type = 'lowpass';
+  lowpass.frequency.setValueAtTime(280, now);
+  lowpass.frequency.linearRampToValueAtTime(650, now+0.2);
+  lowpass.frequency.linearRampToValueAtTime(180, now+duration);
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0.0001, now);
+  gain.gain.exponentialRampToValueAtTime(0.35, now+0.15);
+  gain.gain.exponentialRampToValueAtTime(0.0001, now+duration);
+  osc.connect(lowpass).connect(gain).connect(ctx.destination);
+  osc.start(now); osc.stop(now+duration);
+  playNoise(duration*0.8, 0.15, 300);
+}
+function playRaptorScreechSynth(){
+  playTone(1800, 0.16, 'sawtooth', 0.15, 900);
+  setTimeout(()=>playTone(2100, 0.12, 'sawtooth', 0.12, 1300), 90);
+}
+function playDoorCreak(opening){
+  const ctx = ensureAudio();
+  if(!ctx) return;
+  const now = ctx.currentTime;
+  const duration = 0.35;
+  const bufferSize = Math.floor(ctx.sampleRate*duration);
+  const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+  const data = buffer.getChannelData(0);
+  for(let i=0;i<bufferSize;i++) data[i] = Math.random()*2-1;
+  const src = ctx.createBufferSource();
+  src.buffer = buffer;
+  const filter = ctx.createBiquadFilter();
+  filter.type = 'bandpass';
+  filter.Q.value = 8;
+  filter.frequency.setValueAtTime(opening?250:500, now);
+  filter.frequency.linearRampToValueAtTime(opening?500:200, now+duration);
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0.0001, now);
+  gain.gain.linearRampToValueAtTime(0.22, now+0.03);
+  gain.gain.exponentialRampToValueAtTime(0.0001, now+duration);
+  src.connect(filter).connect(gain).connect(ctx.destination);
+  src.start(now);
+  if(!opening) setTimeout(()=>playTone(90, 0.1, 'sine', 0.15, 55), duration*1000*0.85); // soft thud on shut
+}
+function playWindowSlide(opening){
+  playNoise(0.12, 0.12, opening?2200:1400);
+  setTimeout(()=>playTone(opening?700:500, 0.08, 'sine', 0.1, opening?900:400), 60);
+}
 const SFX = {
   breakBlock(){ playNoise(0.15, 0.35, 1200); playTone(90, 0.12, 'sine', 0.15, 50); },
   placeBlock(){ playNoise(0.09, 0.22, 2400); playTone(180, 0.08, 'triangle', 0.1, 260); },
@@ -1304,8 +1509,14 @@ const SFX = {
   },
   death(){ playTone(300, 0.6, 'sawtooth', 0.2, 50); playNoise(0.5, 0.14, 400); },
   roar(){ playRoar(); },
+  trexRoar(){ if(!trexRoarClip.play()) playTrexRoarSynth(); },
+  raptorScreech(){ if(!raptorScreechClip.play(undefined, 0.7)) playRaptorScreechSynth(); },
+  doorToggle(opening){ playDoorCreak(opening); },
+  windowToggle(opening){ playWindowSlide(opening); },
 };
-loadLionRoar();
+lionRoarClip.load();
+trexRoarClip.load();
+raptorScreechClip.load();
 
 // ---------- Combat ----------
 let myHP = PLAYER_MAX_HP;
@@ -1366,9 +1577,13 @@ function findAttackTarget(){
   const origin = camera.position;
   let best = null, bestDist = Infinity;
   animals.forEach(a=>{
-    const dx=a.x-origin.x, dy=(a.y+0.4)-origin.y, dz=a.z-origin.z;
+    // Bigger animals (elephant, T-Rex...) need a longer reach so the player can hit their
+    // visible body, not just the exact ground point their position is tracked from.
+    const aimY = ANIMAL_REAL_HEIGHT[a.type] || 0.4;
+    const range = ATTACK_RANGE + (ANIMAL_STATS[a.type].reach||0);
+    const dx=a.x-origin.x, dy=(a.y+aimY)-origin.y, dz=a.z-origin.z;
     const dist = Math.hypot(dx,dy,dz);
-    if(dist>ATTACK_RANGE || dist>=bestDist) return;
+    if(dist>range || dist>=bestDist) return;
     const dot = (dx/dist)*dir.x + (dy/dist)*dir.y + (dz/dist)*dir.z;
     if(dot>ATTACK_ANGLE_COS){ best = {type:'animal', ref:a}; bestDist = dist; }
   });
@@ -1465,6 +1680,12 @@ function applyWorldEdit(x,y,z,val,fromRemote){
   onBlockChanged(x,y,z);
   saveEdits();
   if(!fromRemote && fbReady) db.ref('world/edits/'+k).set(val);
+}
+function toggleOpenable(x,y,z,current){
+  const opening = current===WINDOW || current===DOOR; // toggling FROM the closed state
+  applyWorldEdit(x, y, z, TOGGLE_MAP[current], false);
+  if(current===WINDOW || current===WINDOW_OPEN) SFX.windowToggle(opening);
+  else SFX.doorToggle(opening);
 }
 let lastBroadcast = 0;
 function broadcastPosition(now){
@@ -1585,7 +1806,7 @@ function updateHandView(dt, moving, sprinting){
 
 function blockSolid(bx,by,bz){
   const b = getBlock(bx,by,bz);
-  return b!==AIR && b!==WATER;
+  return b!==AIR && b!==WATER && b!==WINDOW_OPEN && b!==DOOR_OPEN;
 }
 function collidesBox(px,py,pz){
   const w = player.width/2;
@@ -1677,7 +1898,7 @@ function breakBlock(){
   const b = getBlock(hit.x,hit.y,hit.z);
   if(b===BEDROCK) return;
   applyWorldEdit(hit.x, hit.y, hit.z, AIR, false);
-  if(COLLECTIBLE.has(b)){ invAdd(b,1); saveInventory(); }
+  if(COLLECTIBLE.has(b)){ invAdd(COLLECT_AS[b] || b, 1); saveInventory(); }
   updateHotbarUI();
   triggerSwing();
   SFX.breakBlock();
@@ -1746,7 +1967,9 @@ document.addEventListener('mousedown', e=>{
   if(e.button===0){ if(!tryAttack()) breakBlock(); }
   if(e.button===2){
     const hit = raycastBlock();
-    if(hit && getBlock(hit.x,hit.y,hit.z)===CRAFTING_TABLE) openCrafting();
+    const hitBlock = hit ? getBlock(hit.x,hit.y,hit.z) : null;
+    if(hitBlock===CRAFTING_TABLE) openCrafting();
+    else if(hitBlock in TOGGLE_MAP) toggleOpenable(hit.x, hit.y, hit.z, hitBlock);
     else placeBlock();
   }
 });
@@ -1765,7 +1988,7 @@ function updateHotbarUI(){
     sw.style.background = swatchColor(b);
     slot.appendChild(sw);
     const key = document.createElement('div');
-    key.className='key'; key.textContent = (i+1)%10;
+    key.className='key'; key.textContent = i<10 ? (i+1)%10 : ''; // slots past 10 are scroll-only
     slot.appendChild(key);
     const count_el = document.createElement('div');
     count_el.className='count'; count_el.textContent = count;
@@ -1893,6 +2116,7 @@ function animate(now){
   updateHandView(dt, moving, sprinting);
   updateRemotePlayers(dt);
   updateAnimals(dt);
+  updateRespawns(dt);
   broadcastPosition(now);
 
   if(thirdPerson){
