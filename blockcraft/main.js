@@ -82,6 +82,10 @@ const ANIMAL_STATS = {
 const ANIMAL_REAL_HEIGHT = {
   sheep: 0.8, dog: 0.58, cow: 1.4, giraffe: 3.0, lion: 1.2, elephant: 3.3,
 };
+// Rough horizontal collision radius per species, used for entity-vs-entity collision below.
+const ANIMAL_RADIUS = {
+  sheep: 0.35, dog: 0.22, cow: 0.5, giraffe: 0.5, lion: 0.4, elephant: 0.95,
+};
 
 // ---------- Crafting ----------
 const RECIPES = [
@@ -1024,8 +1028,7 @@ function updateAnimal(a, dt){
       const nx = dxp/distToPlayer, nz = dzp/distToPlayer;
       a.yaw = Math.atan2(-nx, -nz);
       if(distToPlayer > ATTACK_RANGE*0.4 + stats.reach){
-        a.x += nx*stats.chaseSpeed*dt;
-        a.z += nz*stats.chaseSpeed*dt;
+        stepAnimal(a, nx*stats.chaseSpeed*dt, nz*stats.chaseSpeed*dt);
         moving = true;
       } else if(a.attackCooldown<=0){
         damagePlayer(stats.dmg, a.type);
@@ -1045,8 +1048,7 @@ function updateAnimal(a, dt){
       if(td>0.15){
         const nx=tdx/td, nz=tdz/td;
         a.yaw = Math.atan2(-nx,-nz);
-        a.x += nx*stats.speed*dt*0.5;
-        a.z += nz*stats.speed*dt*0.5;
+        stepAnimal(a, nx*stats.speed*dt*0.5, nz*stats.speed*dt*0.5);
         moving = true;
       } else a.target = null;
     }
@@ -1269,6 +1271,10 @@ lionRoarClip.load();
 
 // ---------- Combat ----------
 let myHP = PLAYER_MAX_HP;
+// Regen: standing still (no movement keys held) for a bit slowly heals a half-heart at a time.
+const REGEN_IDLE_DELAY = 2;   // seconds of standing still before regen starts
+const REGEN_INTERVAL = 1.5;   // seconds between each half-heart tick while idle
+let idleTimer = 0, regenTimer = 0;
 function heartSVG(kind, i){
   const red='#d9463c', gray='#4a4a4a', dark='#2a2a2a';
   const path = 'M12 21s-7.5-4.6-10-9.3C0.3 8.5 2 5 5.5 5c2 0 3.3 1.1 4 2.2C10.2 6.1 11.5 5 13.5 5 17 5 18.7 8.5 17 11.7 15.5 16.4 12 21 12 21z';
@@ -1430,11 +1436,34 @@ function applyWorldEdit(x,y,z,val,fromRemote){
   saveEdits();
   if(!fromRemote && fbReady) db.ref('world/edits/'+k).set(val);
 }
+function findDoorCells(x,y,z){
+  const isDoor = b => b===DOOR || b===DOOR_OPEN;
+  let baseY = y;
+  while(isDoor(getBlock(x,baseY-1,z))) baseY--;
+  let axis=null, dir=1;
+  if(isDoor(getBlock(x+1,baseY,z))){ axis='x'; dir=1; }
+  else if(isDoor(getBlock(x-1,baseY,z))){ axis='x'; dir=-1; }
+  else if(isDoor(getBlock(x,baseY,z+1))){ axis='z'; dir=1; }
+  else if(isDoor(getBlock(x,baseY,z-1))){ axis='z'; dir=-1; }
+  else return null;
+  const baseX = axis==='x' ? (dir===1?x:x-1) : x;
+  const baseZ = axis==='z' ? (dir===1?z:z-1) : z;
+  const cells = [];
+  for(let dy=0; dy<3; dy++)
+    for(let w=0; w<2; w++)
+      cells.push({ x: axis==='x'?baseX+w:baseX, y: baseY+dy, z: axis==='z'?baseZ+w:baseZ });
+  return cells;
+}
 function toggleOpenable(x,y,z,current){
   const opening = current===WINDOW || current===DOOR; // toggling FROM the closed state
+  if(current===DOOR || current===DOOR_OPEN){
+    const cells = findDoorCells(x,y,z) || [{x,y,z}];
+    for(const c of cells) applyWorldEdit(c.x, c.y, c.z, TOGGLE_MAP[current], false);
+    SFX.doorToggle(opening);
+    return;
+  }
   applyWorldEdit(x, y, z, TOGGLE_MAP[current], false);
-  if(current===WINDOW || current===WINDOW_OPEN) SFX.windowToggle(opening);
-  else SFX.doorToggle(opening);
+  SFX.windowToggle(opening);
 }
 let lastBroadcast = 0;
 function broadcastPosition(now){
@@ -1569,6 +1598,41 @@ function collidesBox(px,py,pz){
   return false;
 }
 
+// ---------- Entity-vs-entity collision (players & animals can't walk through each other) ----------
+// excludeAnimal: pass the animal doing the checking (so it also gets checked against the local
+// player); leave undefined when the local player itself is the one moving.
+function entityBlockedByOthers(px,pz,radius,excludeAnimal){
+  for(const a of animals){
+    if(a===excludeAnimal) continue;
+    const r = radius + (ANIMAL_RADIUS[a.type]||0.4);
+    const dx=px-a.x, dz=pz-a.z;
+    if(dx*dx+dz*dz < r*r) return true;
+  }
+  if(excludeAnimal){
+    const r = radius + player.width/2;
+    const dx=px-player.pos.x, dz=pz-player.pos.z;
+    if(dx*dx+dz*dz < r*r) return true;
+  }
+  for(const [,rp] of remotePlayers){
+    const r = radius + player.width/2;
+    const dx=px-rp.mesh.position.x, dz=pz-rp.mesh.position.z;
+    if(dx*dx+dz*dz < r*r) return true;
+  }
+  return false;
+}
+// Animals don't jump, so a step up of more than one block (a wall, a building) simply blocks them —
+// matches how groundHeightAt already snaps them onto gradual terrain.
+function animalStepBlocked(nx,nz,baseY){
+  return groundHeightAt(nx,nz) - baseY > 1;
+}
+function stepAnimal(a,dxMove,dzMove){
+  const r = ANIMAL_RADIUS[a.type]||0.4;
+  const tryX = a.x+dxMove;
+  if(!animalStepBlocked(tryX,a.z,a.y) && !entityBlockedByOthers(tryX,a.z,r,a)) a.x = tryX;
+  const tryZ = a.z+dzMove;
+  if(!animalStepBlocked(a.x,tryZ,a.y) && !entityBlockedByOthers(a.x,tryZ,r,a)) a.z = tryZ;
+}
+
 function getLookDir(yaw,pitch){
   return new THREE.Vector3(
     -Math.sin(yaw)*Math.cos(pitch),
@@ -1603,8 +1667,9 @@ function updatePlayer(dt){
 
   const dx = mx*speed*dt, dz = mz*speed*dt, dy = player.vel.y*dt;
 
-  if(!collidesBox(player.pos.x+dx, player.pos.y, player.pos.z)) player.pos.x += dx;
-  if(!collidesBox(player.pos.x, player.pos.y, player.pos.z+dz)) player.pos.z += dz;
+  const pr = player.width/2;
+  if(!collidesBox(player.pos.x+dx, player.pos.y, player.pos.z) && !entityBlockedByOthers(player.pos.x+dx, player.pos.z, pr)) player.pos.x += dx;
+  if(!collidesBox(player.pos.x, player.pos.y, player.pos.z+dz) && !entityBlockedByOthers(player.pos.x, player.pos.z+dz, pr)) player.pos.z += dz;
   if(!collidesBox(player.pos.x, player.pos.y+dy, player.pos.z)){
     player.pos.y += dy;
     player.onGround = false;
@@ -1625,6 +1690,22 @@ function updatePlayer(dt){
   player.pos.x = Math.max(1, Math.min(WORLD_SIZE-1, player.pos.x));
   player.pos.z = Math.max(1, Math.min(WORLD_SIZE-1, player.pos.z));
   if(player.pos.y < -20) spawnPlayer();
+
+  if(len>0 || !player.onGround || myHP<=0){
+    idleTimer = 0;
+    regenTimer = 0;
+  } else if(myHP < PLAYER_MAX_HP){
+    idleTimer += dt;
+    if(idleTimer >= REGEN_IDLE_DELAY){
+      regenTimer += dt;
+      if(regenTimer >= REGEN_INTERVAL){
+        regenTimer -= REGEN_INTERVAL;
+        myHP = Math.min(PLAYER_MAX_HP, myHP + HP_PER_HEART/2);
+        updateHeartsUI();
+        if(fbReady) db.ref('players/'+myId+'/hp').set(myHP);
+      }
+    }
+  }
 }
 
 // ---------- Block interaction ----------
@@ -1646,23 +1727,56 @@ function breakBlock(){
   if(!hit) return;
   const b = getBlock(hit.x,hit.y,hit.z);
   if(b===BEDROCK) return;
+  if(b===DOOR || b===DOOR_OPEN){
+    const cells = findDoorCells(hit.x,hit.y,hit.z) || [{x:hit.x,y:hit.y,z:hit.z}];
+    for(const c of cells) applyWorldEdit(c.x, c.y, c.z, AIR, false);
+    invAdd(DOOR, 1);
+    saveInventory();
+    updateHotbarUI();
+    triggerSwing();
+    SFX.breakBlock();
+    return;
+  }
   applyWorldEdit(hit.x, hit.y, hit.z, AIR, false);
   if(COLLECTIBLE.has(b)){ invAdd(COLLECT_AS[b] || b, 1); saveInventory(); }
   updateHotbarUI();
   triggerSwing();
   SFX.breakBlock();
 }
+function playerOverlapsCell(x,y,z){
+  const w = player.width/2;
+  const px=player.pos.x, py=player.pos.y, pz=player.pos.z;
+  return (x+1>px-w && x<px+w && z+1>pz-w && z<pz+w && y<py+player.height && y+1>py);
+}
+function placeDoor(hit){
+  const {x,y,z} = hit.prev;
+  if(invCount(DOOR)<=0) return;
+  const dx = hit.prev.x - hit.x, dz = hit.prev.z - hit.z;
+  const axis = dx!==0 ? 'z' : 'x';
+  const cells = [];
+  for(let dy=0; dy<3; dy++)
+    for(let w=0; w<2; w++)
+      cells.push({ x: axis==='x'?x+w:x, y: y+dy, z: axis==='z'?z+w:z });
+  for(const c of cells){
+    if(getBlock(c.x,c.y,c.z)!==AIR) return;
+    if(playerOverlapsCell(c.x,c.y,c.z)) return;
+  }
+  for(const c of cells) applyWorldEdit(c.x, c.y, c.z, DOOR, false);
+  invSub(DOOR,1);
+  saveInventory();
+  updateHotbarUI();
+  triggerSwing();
+  SFX.placeBlock();
+}
 function placeBlock(){
   const hit = raycastBlock();
   if(!hit || !hit.prev) return;
+  const block = HOTBAR[selectedSlot];
+  if(block===DOOR){ placeDoor(hit); return; }
   const {x,y,z} = hit.prev;
   if(getBlock(x,y,z)!==AIR) return;
-  const block = HOTBAR[selectedSlot];
   if(invCount(block)<=0) return;
-  const w = player.width/2;
-  const px=player.pos.x, py=player.pos.y, pz=player.pos.z;
-  const overlapsPlayer = (x+1>px-w && x<px+w && z+1>pz-w && z<pz+w && y<py+player.height && y+1>py);
-  if(overlapsPlayer) return;
+  if(playerOverlapsCell(x,y,z)) return;
   applyWorldEdit(x, y, z, block, false);
   invSub(block,1);
   saveInventory();
