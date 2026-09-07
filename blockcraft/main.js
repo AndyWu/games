@@ -18,7 +18,7 @@ const AIR=0, GRASS=1, DIRT=2, STONE=3, SAND=4, WOOD=5, LEAVES=6, PLANKS=7, WATER
 const CRAFTING_TABLE=10, BRICKS=11, STICK=12;
 const WINDOW=13, WINDOW_OPEN=14, DOOR=15, DOOR_OPEN=16;
 const SAPLING=17;
-const FLINT=18, FIRE=19, TORCH=20;
+const FLINT=18, FIRE=19, TORCH=20, FIREWORK=21;
 
 const BLOCK_COLOR = {
   [GRASS]:  0x5b8a3a,
@@ -41,18 +41,19 @@ const BLOCK_COLOR = {
   [FLINT]: 0x5c5f66,
   [FIRE]: 0xff8a2b,
   [TORCH]: 0xd98a3d,
+  [FIREWORK]: 0xd94dcf,
 };
 const BLOCK_NAME = {
   [GRASS]:'Grass', [DIRT]:'Dirt', [STONE]:'Stone', [SAND]:'Sand', [WOOD]:'Wood',
   [LEAVES]:'Leaves', [PLANKS]:'Planks', [WATER]:'Water',
   [CRAFTING_TABLE]:'Crafting Table', [BRICKS]:'Bricks', [STICK]:'Stick',
   [WINDOW]:'Window', [WINDOW_OPEN]:'Window (open)', [DOOR]:'Door', [DOOR_OPEN]:'Door (open)',
-  [SAPLING]:'Sapling', [FLINT]:'Flint', [FIRE]:'Fire', [TORCH]:'Torch',
+  [SAPLING]:'Sapling', [FLINT]:'Flint', [FIRE]:'Fire', [TORCH]:'Torch', [FIREWORK]:'Firework',
 };
 // Every item the player can ever select. The hotbar only shows HOTBAR_SIZE of these at a time —
 // the rest are reachable through the Items panel (the palette button, or the "I" key), which lets
 // the player swap any hotbar slot for anything in this list.
-const ALL_ITEMS = [GRASS, DIRT, STONE, SAND, WOOD, LEAVES, PLANKS, WATER, CRAFTING_TABLE, BRICKS, STICK, WINDOW, DOOR, FLINT, TORCH];
+const ALL_ITEMS = [GRASS, DIRT, STONE, SAND, WOOD, LEAVES, PLANKS, WATER, CRAFTING_TABLE, BRICKS, STICK, WINDOW, DOOR, FLINT, TORCH, FIREWORK];
 const HOTBAR_SIZE = 9;
 const DEFAULT_HOTBAR = [GRASS, DIRT, STONE, SAND, WOOD, PLANKS, CRAFTING_TABLE, DOOR, FLINT];
 const HOTBAR = DEFAULT_HOTBAR.slice();
@@ -69,7 +70,7 @@ function loadHotbar(){
 }
 // A few items are structures/tools, not plain materials — give them a distinct glyph on top of
 // their swatch so they read at a glance instead of just being "another colored square."
-const HOTBAR_ICON = { [CRAFTING_TABLE]: '🛠️', [WINDOW]: '🪟', [DOOR]: '🚪', [FLINT]: '🔥', [TORCH]: '🕯️' };
+const HOTBAR_ICON = { [CRAFTING_TABLE]: '🛠️', [WINDOW]: '🪟', [DOOR]: '🚪', [FLINT]: '🔥', [TORCH]: '🕯️', [FIREWORK]: '🎆' };
 // Blocks with an open/closed state: right-clicking one toggles it to the other id in this map.
 const TOGGLE_MAP = { [WINDOW]:WINDOW_OPEN, [WINDOW_OPEN]:WINDOW, [DOOR]:DOOR_OPEN, [DOOR_OPEN]:DOOR };
 // Breaking the open form of a toggleable block gives you back its closed (placeable) form.
@@ -126,7 +127,8 @@ const RECIPES = [
   { name:'Torch',          out:{id:TORCH, qty:2},           in:[{id:STICK, qty:1}, {id:FLINT, qty:1}] },
 ];
 const inventory = {};
-function invCount(id){ return inventory[id]||0; }
+// Fireworks are unlimited — no recipe, never consumed, always available regardless of what's saved.
+function invCount(id){ return id===FIREWORK ? Infinity : (inventory[id]||0); }
 function invAdd(id,n){ inventory[id] = (inventory[id]||0)+n; }
 function invSub(id,n){ inventory[id] = Math.max(0,(inventory[id]||0)-n); }
 function canCraft(recipe){ return recipe.in.every(ing => invCount(ing.id) >= ing.qty); }
@@ -1406,8 +1408,12 @@ function playNoise(duration, volume, filterFreq, attack){
 }
 // Real recording (public domain, see assets/README.md) for the lion roar — loaded once up front,
 // falls back to a synthesized growl if the file can't be fetched/decoded.
-function makeClipPlayer(url, defaultClipDuration, tailFade){
+// offset: where in the source file playback starts each time (seconds) — lets a clip player pull a
+// short clean moment out of a much longer recording (see firework-burst below) without needing to
+// re-encode a separate trimmed file.
+function makeClipPlayer(url, defaultClipDuration, tailFade, offset){
   let buffer = null;
+  const startOffset = offset || 0;
   function load(){
     fetch(url)
       .then(r => { if(!r.ok) throw new Error('http '+r.status); return r.arrayBuffer(); })
@@ -1423,22 +1429,28 @@ function makeClipPlayer(url, defaultClipDuration, tailFade){
     const ctx = ensureAudio();
     if(!ctx || !buffer) return false;
     const now = ctx.currentTime;
-    const dur = Math.min(clipDuration!=null ? clipDuration : defaultClipDuration, buffer.duration);
+    const dur = Math.min(clipDuration!=null ? clipDuration : defaultClipDuration, buffer.duration-startOffset);
     const fade = tailFade!=null ? tailFade : 0.3;
+    const fadeIn = 0.04; // avoids a click when starting mid-file (offset>0)
     const vol = volume!=null ? volume : 0.8;
     const src = ctx.createBufferSource();
     src.buffer = buffer;
     const gain = ctx.createGain();
-    gain.gain.setValueAtTime(vol, now);
-    gain.gain.setValueAtTime(vol, now + Math.max(0, dur-fade));
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.linearRampToValueAtTime(vol, now+fadeIn);
+    gain.gain.setValueAtTime(vol, now + Math.max(fadeIn, dur-fade));
     gain.gain.linearRampToValueAtTime(0.0001, now + dur);
     src.connect(gain).connect(ctx.destination);
-    src.start(now, 0, dur);
+    src.start(now, startOffset, dur);
     return true;
   }
   return { load, play };
 }
 const lionRoarClip = makeClipPlayer('assets/lion-roar.ogg', 2.2, 0.35);
+// Public-domain "Fireworks in distance - 3" field recording (see assets/README.md) — pulls just the
+// one clean burst moment (found by scanning the recording for its loudest window) out of the full
+// 46s file rather than needing a separately re-encoded clip.
+const fireworkBurstClip = makeClipPlayer('assets/firework-burst.ogg', 1.5, 0.4, 22.75);
 function playRoar(){
   if(lionRoarClip.play()) return;
   const ctx = ensureAudio();
@@ -1552,8 +1564,21 @@ const SFX = {
   igniteFire(){ playNoise(0.35, 0.3, 3000, 0.01); playTone(200, 0.3, 'sawtooth', 0.12, 500); },
   fireCrackle(){ playNoise(0.06, 0.06, 4000, 0.002); },
   windGust(vol, filterFreq){ playNoise(1.4, vol, filterFreq, 0.3); },
+  // Rising whistle for the climb (freqEnd above freq sweeps the pitch upward), then a low thump
+  // plus a handful of staggered bright crackle-pops for the colorful burst up top.
+  fireworkLaunch(){ playTone(280, 0.9, 'sine', 0.1, 900, 0.05); playNoise(0.8, 0.05, 5500, 0.05); },
+  fireworkBurst(){
+    if(!fireworkBurstClip.play(null, 0.7)){
+      playNoise(0.3, 0.32, 700, 0.004);
+      playTone(75, 0.35, 'sawtooth', 0.2, 40);
+    }
+    for(let i=0;i<6;i++){
+      setTimeout(()=>playNoise(0.05+Math.random()*0.05, 0.09, 2800+Math.random()*3400, 0.002), 50+i*65+Math.random()*40);
+    }
+  },
 };
 lionRoarClip.load();
+fireworkBurstClip.load();
 
 // ---------- Combat ----------
 let myHP = PLAYER_MAX_HP;
@@ -2412,6 +2437,101 @@ function removeFireFx(key){
   if(fx){ scene.remove(fx.light); scene.remove(fx.flame); fireFx.delete(key); }
 }
 
+// ---------- Fireworks: unlimited, purely a fun effect — no crafting, never consumed ----------
+// A small rocket climbs straight up from wherever you're standing, then blooms into an evenly-
+// spaced spherical shower of colored sparks (a fibonacci-sphere point distribution, which reads as
+// a symmetric "flower" opening outward rather than a random scatter) with a bright flash-light and
+// a boom+crackle sound. Both the climb and the burst are driven from the same per-frame update list
+// pattern as fallingClusters/fires, so a burst that's still fading doesn't block launching another.
+const FIREWORK_COLORS = [0xff4d4d, 0xffb347, 0xfff066, 0x7cfc8a, 0x66d9ff, 0xb388ff, 0xff7edb, 0xffffff];
+const FIREWORK_PARTICLES = 48;
+const SPEED_OF_SOUND = 343; // world units (~meters) per second
+const fireworks = [];
+function launchFirework(){
+  const x = player.pos.x, z = player.pos.z;
+  const startY = player.pos.y + player.eye;
+  const mesh = new THREE.Mesh(new THREE.SphereGeometry(0.1,6,6), new THREE.MeshBasicMaterial({color:0xfff2b0}));
+  mesh.position.set(x, startY, z);
+  scene.add(mesh);
+  const trailLight = new THREE.PointLight(0xfff2b0, 1.4, 6, 2);
+  mesh.add(trailLight);
+  fireworks.push({ mesh, x, z, startY, targetY: startY + 9 + Math.random()*5, t:0, riseTime: 0.9, burst:null });
+  SFX.fireworkLaunch();
+}
+function createFireworkBurst(x,y,z){
+  const n = FIREWORK_PARTICLES;
+  const positions = new Float32Array(n*3);
+  const velocities = new Float32Array(n*3);
+  const colors = new Float32Array(n*3);
+  const goldenAngle = Math.PI*(3-Math.sqrt(5));
+  const speed = 3.2 + Math.random()*1.6;
+  const colorA = new THREE.Color(FIREWORK_COLORS[Math.floor(Math.random()*FIREWORK_COLORS.length)]);
+  const colorB = new THREE.Color(FIREWORK_COLORS[Math.floor(Math.random()*FIREWORK_COLORS.length)]);
+  for(let i=0;i<n;i++){
+    const yv = 1 - (i/(n-1))*2;
+    const r = Math.sqrt(Math.max(0, 1-yv*yv));
+    const theta = goldenAngle*i;
+    const dx = Math.cos(theta)*r, dz = Math.sin(theta)*r;
+    positions[i*3]=x; positions[i*3+1]=y; positions[i*3+2]=z;
+    velocities[i*3]=dx*speed; velocities[i*3+1]=yv*speed; velocities[i*3+2]=dz*speed;
+    const c = i%2===0 ? colorA : colorB;
+    colors[i*3]=c.r; colors[i*3+1]=c.g; colors[i*3+2]=c.b;
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(positions,3));
+  geo.setAttribute('color', new THREE.BufferAttribute(colors,3));
+  const mat = new THREE.PointsMaterial({ size:0.32, vertexColors:true, transparent:true, opacity:1, depthWrite:false, sizeAttenuation:true });
+  const points = new THREE.Points(geo, mat);
+  scene.add(points);
+  const light = new THREE.PointLight(colorA.getHex(), 3.2, 14, 2);
+  light.position.set(x,y,z);
+  scene.add(light);
+  return { points, velocities, light, t:0, life:1.3 };
+}
+function updateFireworkBurst(b, dt){
+  const pos = b.points.geometry.attributes.position.array;
+  for(let i=0;i<b.velocities.length/3;i++){
+    pos[i*3]   += b.velocities[i*3]*dt;
+    pos[i*3+1] += b.velocities[i*3+1]*dt;
+    pos[i*3+2] += b.velocities[i*3+2]*dt;
+    b.velocities[i*3+1] -= 2.2*dt; // gentle droop instead of expanding forever
+    b.velocities[i*3]   *= 0.98;
+    b.velocities[i*3+2] *= 0.98;
+  }
+  b.points.geometry.attributes.position.needsUpdate = true;
+  b.t += dt;
+  const lt = Math.min(1, b.t/b.life);
+  b.points.material.opacity = 1-lt;
+  b.light.intensity = Math.max(0, 3.2*(1-lt*3)); // the flash itself only lasts the first third
+}
+function updateFireworks(dt){
+  for(let i=fireworks.length-1; i>=0; i--){
+    const f = fireworks[i];
+    if(!f.burst){
+      f.t += dt;
+      const p = Math.min(1, f.t/f.riseTime);
+      f.mesh.position.y = f.startY + (f.targetY-f.startY)*p;
+      if(p>=1){
+        const bx=f.mesh.position.x, by=f.mesh.position.y, bz=f.mesh.position.z;
+        scene.remove(f.mesh);
+        f.burst = createFireworkBurst(bx,by,bz);
+        // Light reaches you instantly, sound doesn't — delay the boom by how long it actually takes
+        // to travel from the burst to your ears (speed of sound, world units treated as meters), so a
+        // burst you're right under is basically instant while a distant one visibly lags its sound.
+        const dist = Math.hypot(bx-player.pos.x, by-(player.pos.y+player.eye), bz-player.pos.z);
+        setTimeout(()=>SFX.fireworkBurst(), (dist/SPEED_OF_SOUND)*1000);
+      }
+    } else {
+      updateFireworkBurst(f.burst, dt);
+      if(f.burst.t>=f.burst.life){
+        scene.remove(f.burst.points);
+        scene.remove(f.burst.light);
+        fireworks.splice(i,1);
+      }
+    }
+  }
+}
+
 function findDoorCells(x,y,z){
   const isDoor = b => b===DOOR || b===DOOR_OPEN;
   let baseY = y;
@@ -2874,6 +2994,7 @@ function doInteract(){
   const hit = raycastBlock();
   const hitBlock = hit ? getBlock(hit.x,hit.y,hit.z) : null;
   if(HOTBAR[selectedSlot]===FLINT){ tryIgniteFire(hit); return; }
+  if(HOTBAR[selectedSlot]===FIREWORK){ launchFirework(); return; }
   if(hitBlock===CRAFTING_TABLE) openCrafting();
   else if(hitBlock in TOGGLE_MAP) toggleOpenable(hit.x, hit.y, hit.z, hitBlock);
   else placeBlock();
@@ -3032,7 +3153,7 @@ function updateHotbarUI(){
     key.className='key'; key.textContent = HOTBAR_KEYS[i] ? HOTBAR_KEYS[i].slice(3) : '';
     slot.appendChild(key);
     const count_el = document.createElement('div');
-    count_el.className='count'; count_el.textContent = count;
+    count_el.className='count'; count_el.textContent = count===Infinity ? '∞' : count;
     slot.appendChild(count_el);
     slot.title = BLOCK_NAME[b] + ' (click again to change)';
     slot.addEventListener('click', ()=>{
@@ -3140,13 +3261,13 @@ function makeItemTile(id){
   }
   const countEl = document.createElement('div');
   countEl.className = 'itemCount';
-  countEl.textContent = count>0 ? count : '';
+  countEl.textContent = count===Infinity ? '∞' : (count>0 ? count : '');
   tile.appendChild(countEl);
   const label = document.createElement('div');
   label.className = 'itemLabel';
   label.textContent = BLOCK_NAME[id];
   tile.appendChild(label);
-  tile.title = BLOCK_NAME[id] + (count>0 ? ` — you have ${count}` : ' — you have none yet');
+  tile.title = BLOCK_NAME[id] + (count===Infinity ? ' — unlimited' : (count>0 ? ` — you have ${count}` : ' — you have none yet'));
   tile.addEventListener('click', ()=>{
     HOTBAR[selectedSlot] = id;
     saveHotbar();
@@ -3257,6 +3378,7 @@ function animate(now){
   updateFallingClusters(dt);
   updateSaplings(dt);
   updateFires(dt);
+  updateFireworks(dt);
   heldTorchLight.visible = HOTBAR[selectedSlot]===TORCH;
   if(heldTorchLight.visible) heldTorchLight.intensity = 1.0 + Math.random()*0.3;
   updateDayNight();
