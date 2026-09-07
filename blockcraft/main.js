@@ -1413,6 +1413,7 @@ const SFX = {
   thunder(){ playNoise(1.6, 0.32, 220, 0.02); playTone(55, 1.2, 'sawtooth', 0.15, 30); },
   igniteFire(){ playNoise(0.35, 0.3, 3000, 0.01); playTone(200, 0.3, 'sawtooth', 0.12, 500); },
   fireCrackle(){ playNoise(0.06, 0.06, 4000, 0.002); },
+  windGust(vol, filterFreq){ playNoise(1.4, vol, filterFreq, 0.3); },
 };
 lionRoarClip.load();
 
@@ -1799,6 +1800,44 @@ function currentWeatherBlend(){
   return { from: to, to, lt: 1 };
 }
 function lerp(a,b,t){ return a+(b-a)*t; }
+
+// ---------- Wind ----------
+// Same philosophy as day/night and weather: derived purely from the wall clock, so it's random
+// (nobody chose it) but perfectly in sync for every player with no networking at all. Strength is a
+// smooth, organic-looking signal built from a few sine waves at unrelated frequencies (a cheap stand-
+// in for real noise) — a slow-moving base plus a faster gust layer — biased by the current weather
+// (storms are windier than a clear sky on average) and clamped to [0,1] (calm to a full gale).
+const WIND_DIR_PERIOD_S = 900; // wind direction slowly drifts all the way around every 15 min
+const WEATHER_WIND_BIAS = { sunny:0.7, cloudy:0.95, rainy:1.15, rainstorm:1.5, thunderstorm:1.8 };
+const WIND_LEVELS = [
+  { max:0.12, label:'Calm' },
+  { max:0.32, label:'Light breeze' },
+  { max:0.55, label:'Breezy' },
+  { max:0.78, label:'Strong wind' },
+  { max:Infinity, label:'Very strong wind' },
+];
+function smoothNoise01(t, seed){
+  return 0.5 + 0.28*Math.sin(t*0.0173 + seed*1.7)
+             + 0.15*Math.sin(t*0.0071 + seed*3.1)
+             + 0.07*Math.sin(t*0.0311 + seed*5.9);
+}
+function windLabel(strength){
+  for(const lvl of WIND_LEVELS) if(strength<=lvl.max) return lvl.label;
+  return WIND_LEVELS[WIND_LEVELS.length-1].label;
+}
+function currentWind(){
+  const t = Date.now()/1000;
+  const { from, to, lt } = currentWeatherBlend();
+  const biasFrom = WEATHER_WIND_BIAS[from.id]!=null ? WEATHER_WIND_BIAS[from.id] : 1;
+  const biasTo = WEATHER_WIND_BIAS[to.id]!=null ? WEATHER_WIND_BIAS[to.id] : 1;
+  const bias = lerp(biasFrom, biasTo, lt);
+  const base = smoothNoise01(t, 11);
+  const gust = smoothNoise01(t*7, 29);
+  const strength = Math.max(0, Math.min(1, (base*0.7 + gust*0.3) * bias));
+  const angle = (t/WIND_DIR_PERIOD_S)*Math.PI*2 + (smoothNoise01(t*0.4, 53)-0.5)*1.2;
+  return { strength, angle };
+}
+
 let rainGeo, rainMat, rainPoints, rainVelocities;
 const RAIN_COUNT = 700;
 function ensureRain(){
@@ -1816,13 +1855,17 @@ function ensureRain(){
   rainPoints.frustumCulled = false;
   scene.add(rainPoints);
 }
-function updateRain(dt, intensity){
+const MAX_RAIN_DRIFT = 7; // sideways speed (units/s) rain drifts at full wind strength
+function updateRain(dt, intensity, wind){
   if(intensity<=0){ if(rainPoints) rainPoints.visible=false; return; }
   ensureRain();
   rainPoints.visible = true;
   const positions = rainGeo.attributes.position.array;
   const activeCount = Math.min(RAIN_COUNT, Math.round(RAIN_COUNT * Math.min(1, intensity)));
   const cx=player.pos.x, cy=player.pos.y, cz=player.pos.z;
+  const windSpeed = (wind ? wind.strength : 0) * MAX_RAIN_DRIFT;
+  const windDx = wind ? Math.cos(wind.angle)*windSpeed : 0;
+  const windDz = wind ? Math.sin(wind.angle)*windSpeed : 0;
   for(let i=0;i<RAIN_COUNT;i++){
     if(i>=activeCount){ positions[i*3+1] = -9999; continue; }
     let y = positions[i*3+1];
@@ -1832,12 +1875,14 @@ function updateRain(dt, intensity){
       positions[i*3+2] = cz + (Math.random()*2-1)*22;
     } else {
       positions[i*3+1] = y - rainVelocities[i]*dt;
+      positions[i*3] += windDx*dt;
+      positions[i*3+2] += windDz*dt;
     }
   }
   rainGeo.attributes.position.needsUpdate = true;
 }
-let rainSoundTimer = 0, lightningTimer = 8+Math.random()*8;
-let lastWeatherLabel = null;
+let rainSoundTimer = 0, lightningTimer = 8+Math.random()*8, windSoundTimer = 3+Math.random()*4;
+let lastWeatherLabel = null, lastWindLabel = null;
 function updateWeather(dt){
   const { from, to, lt } = currentWeatherBlend();
   const fogMul = lerp(from.fogMul, to.fogMul, lt);
@@ -1855,7 +1900,8 @@ function updateWeather(dt){
   hemiLight.intensity *= (1 - darken*0.6);
   sunLight.intensity *= (1 - darken*0.7);
 
-  updateRain(dt, rain);
+  const wind = currentWind();
+  updateRain(dt, rain, wind);
 
   if(rain>0 && locked){
     rainSoundTimer -= dt;
@@ -1871,12 +1917,25 @@ function updateWeather(dt){
       triggerLightning();
     }
   }
+  if(wind.strength>0.12 && locked){
+    windSoundTimer -= dt;
+    if(windSoundTimer<=0){
+      windSoundTimer = 2.5 + Math.random()*2.5;
+      SFX.windGust(Math.min(0.16, wind.strength*0.14), 900+wind.strength*1400);
+    }
+  }
 
   const label = to.label;
   if(label !== lastWeatherLabel){
     lastWeatherLabel = label;
     const el = document.getElementById('weatherLabel');
     if(el) el.textContent = label;
+  }
+  const windText = windLabel(wind.strength);
+  if(windText !== lastWindLabel){
+    lastWindLabel = windText;
+    const el = document.getElementById('windLabel');
+    if(el) el.textContent = windText;
   }
 }
 function triggerLightning(){
