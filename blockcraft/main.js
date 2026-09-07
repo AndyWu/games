@@ -63,11 +63,8 @@ const FALL_DAMAGE_FREE_BLOCKS = 3; // first 3 blocks of any fall are damage-free
 // HP is scaled against the 20-HP (10-heart) human baseline to roughly track real-world size/toughness:
 // sheep and dogs are small and fragile; cows are human-sized; giraffes are big but not armored;
 // lions match a human in raw toughness (they're dangerous because of their attack, not their HP);
-// elephants are the toughest land animal, at double human HP; the T-Rex (paleontological size
-// estimates put it well past an elephant) tops the scale, while velociraptors trade individual
-// toughness for speed and numbers.
-const ANIMAL_TYPES = ['cow','sheep','dog','giraffe','lion','elephant','trex','raptor'];
-const PREY_TYPES = ['cow','sheep','dog','giraffe','lion','elephant']; // huntable by predators
+// elephants are the toughest land animal, at double human HP.
+const ANIMAL_TYPES = ['cow','sheep','dog','giraffe','lion','elephant'];
 const ANIMAL_STATS = {
   sheep:    { maxHp: 3*HP_PER_HEART,  dmg:0, retaliate:false, aggressive:false, speed:1.0, chaseSpeed:1.8, reach:0 },
   dog:      { maxHp: 4*HP_PER_HEART,  dmg:1, retaliate:true,  aggressive:false, speed:1.4, chaseSpeed:3.4, reach:0.15 },
@@ -75,21 +72,16 @@ const ANIMAL_STATS = {
   giraffe:  { maxHp: 8*HP_PER_HEART,  dmg:3, retaliate:true,  aggressive:false, speed:1.1, chaseSpeed:2.6, reach:0.8 },
   lion:     { maxHp: 10*HP_PER_HEART, dmg:4, retaliate:true,  aggressive:true,  speed:1.2, chaseSpeed:3.8, reach:0.4 },
   elephant: { maxHp: 20*HP_PER_HEART, dmg:6, retaliate:true,  aggressive:true,  speed:0.8, chaseSpeed:2.4, reach:2.0 },
-  trex:     { maxHp: 30*HP_PER_HEART, dmg:8, retaliate:true,  aggressive:true,  predator:true, speed:1.0, chaseSpeed:3.2, reach:3.5 },
-  raptor:   { maxHp: 5*HP_PER_HEART,  dmg:2, retaliate:true,  aggressive:true,  predator:true, pack:true, jump:true, speed:1.6, chaseSpeed:5.2, reach:0.1 },
 };
-const PREDATOR_DETECT_RADIUS = 14;
 
 // ---------- Real-world scale ----------
 // Each animal's model was originally built at an arbitrary "looks right together" size. These are
-// the real (or, for the dinosaurs, best paleontological-estimate) shoulder/hip heights in meters —
-// world units are ~1 unit = 1 meter throughout (the player is 1.8 units tall). ANIMAL_SCALE is
-// derived once below by comparing this target height to each model's original bodyY.
+// the real shoulder/hip heights in meters — world units are ~1 unit = 1 meter throughout (the
+// player is 1.8 units tall). ANIMAL_SCALE is derived once below by comparing this target height
+// to each model's original bodyY.
 const ANIMAL_REAL_HEIGHT = {
-  sheep: 0.8, dog: 0.58, cow: 1.4, giraffe: 3.0,
-  lion: 1.2, elephant: 3.3, trex: 3.8, raptor: 0.5,
+  sheep: 0.8, dog: 0.58, cow: 1.4, giraffe: 3.0, lion: 1.2, elephant: 3.3,
 };
-const PREDATOR_DEAGGRO_RADIUS = 22;
 
 // ---------- Crafting ----------
 const RECIPES = [
@@ -803,24 +795,6 @@ const ANIMAL_HIDE = {
       ctx.stroke();
     }
   }),
-  trex: buildHideTexture((ctx,size)=>{
-    fillTileSized(ctx,size,0x5a6a44);
-    speckleSized(ctx,size,0x5a6a44,70,14);
-    ctx.fillStyle = 'rgb(46,54,34)';
-    for(let i=0;i<10;i++){
-      const x=Math.random()*size, y=Math.random()*size, r=2+Math.random()*3;
-      ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.fill();
-    }
-  }),
-  raptor: buildHideTexture((ctx,size)=>{
-    fillTileSized(ctx,size,0x8a6a45);
-    speckleSized(ctx,size,0x8a6a45,60,12);
-    ctx.fillStyle = 'rgb(66,48,30)';
-    for(let i=0;i<7;i++){
-      const y = Math.random()*size;
-      ctx.fillRect(0, y, size, 1.4);
-    }
-  }),
 };
 const ANIMAL_HIDE_MAT = {};
 for(const type of ANIMAL_TYPES) ANIMAL_HIDE_MAT[type] = new THREE.MeshLambertMaterial({ map: ANIMAL_HIDE[type] });
@@ -856,49 +830,6 @@ function makeQuadruped(opts){
 
   g.userData.legs = legs;
   return g;
-}
-// Bipedal build for theropod dinosaurs: two legs under the hips, a forward-leaning tilted
-// torso, a counterbalancing tail, and a head out front — quite different proportions from
-// the four-legged mammal builder above.
-function makeBiped(opts){
-  const g = new THREE.Group();
-  const body = animalBox(opts.bodyW, opts.bodyH, opts.bodyD, opts.bodyMat);
-  body.position.set(0, opts.bodyY, 0);
-  if(opts.bodyTilt) body.rotation.x = opts.bodyTilt;
-  g.add(body);
-
-  const legMat = opts.legMat || opts.bodyMat;
-  const legPositions = [[-opts.legSpread,0],[opts.legSpread,0]]; // L, R
-  const legs = legPositions.map(([px])=>{
-    const leg = animalBox(opts.legW, opts.legH, opts.legW, legMat);
-    leg.geometry.translate(0,-opts.legH/2,0);
-    leg.position.set(px, opts.legH, opts.legZ||0);
-    g.add(leg);
-    return leg;
-  });
-
-  const head = animalBox(opts.headW, opts.headH, opts.headD, opts.headMat || opts.bodyMat);
-  head.position.set(0, opts.headY, opts.headZ);
-  g.add(head);
-
-  const tail = animalBox(opts.tailW, opts.tailH, opts.tailLen, opts.bodyMat);
-  tail.geometry.translate(0, 0, opts.tailLen/2); // pivot at the front (root) of the tail
-  tail.position.set(0, opts.tailY, opts.tailZ);
-  if(opts.tailTilt) tail.rotation.x = opts.tailTilt;
-  g.add(tail);
-
-  if(opts.extras) opts.extras(g, { body, head, legs, tail });
-
-  g.userData.legs = legs; // [L, R] — alternating gait, not the quadruped diagonal pattern
-  return g;
-}
-function animateBipedWalk(group, state, dt, moving, speedMul){
-  state.amp += ((moving?1:0) - state.amp) * Math.min(1, dt*8);
-  state.phase += dt * 8 * (speedMul||1);
-  const swing = Math.sin(state.phase) * 0.55 * state.amp;
-  const [legL, legR] = group.userData.legs;
-  legL.rotation.x = swing;
-  legR.rotation.x = -swing;
 }
 const ANIMAL_BUILDERS = {
   cow(){
@@ -983,37 +914,10 @@ const ANIMAL_BUILDERS = {
       },
     });
   },
-  trex(){
-    const hide = ANIMAL_HIDE_MAT.trex;
-    return makeBiped({
-      bodyW:0.9, bodyH:0.9, bodyD:1.6, bodyY:1.65, bodyMat:hide, bodyTilt:-0.35,
-      legW:0.35, legH:1.5, legSpread:0.28, legZ:0.1,
-      headW:0.5, headH:0.55, headD:0.9, headY:1.85, headZ:-1.15,
-      tailW:0.5, tailH:0.45, tailLen:1.3, tailY:1.55, tailZ:0.7, tailTilt:0.12,
-      extras(g){
-        const armL=animalBox(0.12,0.12,0.35,hide); armL.position.set(-0.35,1.4,-0.55); armL.rotation.x=-0.3; g.add(armL);
-        const armR=animalBox(0.12,0.12,0.35,hide); armR.position.set(0.35,1.4,-0.55); armR.rotation.x=-0.3; g.add(armR);
-        const teeth=animalBox(0.46,0.08,0.85,0xf0ead6); teeth.position.set(0,1.62,-1.1); g.add(teeth);
-      },
-    });
-  },
-  raptor(){
-    const hide = ANIMAL_HIDE_MAT.raptor;
-    return makeBiped({
-      bodyW:0.35, bodyH:0.4, bodyD:0.65, bodyY:0.85, bodyMat:hide, bodyTilt:-0.3,
-      legW:0.11, legH:0.75, legSpread:0.12, legZ:0.05,
-      headW:0.22, headH:0.24, headD:0.4, headY:1.0, headZ:-0.55,
-      tailW:0.12, tailH:0.12, tailLen:0.7, tailY:0.8, tailZ:0.3, tailTilt:0.08,
-      extras(g){
-        const armL=animalBox(0.06,0.06,0.18,hide); armL.position.set(-0.14,0.7,-0.25); armL.rotation.x=-0.3; g.add(armL);
-        const armR=animalBox(0.06,0.06,0.18,hide); armR.position.set(0.14,0.7,-0.25); armR.rotation.x=-0.3; g.add(armR);
-      },
-    });
-  },
 };
 // Original bodyY (quadrupeds) / hip height (bipeds) each model was designed at, before rescaling.
 const ANIMAL_ORIGINAL_BODY_Y = {
-  cow:0.75, sheep:0.5, dog:0.4, giraffe:1.5, lion:0.65, elephant:1.0, trex:1.65, raptor:0.85,
+  cow:0.75, sheep:0.5, dog:0.4, giraffe:1.5, lion:0.65, elephant:1.0,
 };
 const ANIMAL_SCALE = {};
 for(const type of ANIMAL_TYPES) ANIMAL_SCALE[type] = ANIMAL_REAL_HEIGHT[type] / ANIMAL_ORIGINAL_BODY_Y[type];
@@ -1043,7 +947,7 @@ function groundHeightAt(x,z){
   }
   return 1;
 }
-const SPAWN_COUNTS = { cow:4, sheep:5, dog:3, giraffe:3, lion:2, elephant:2, trex:1, raptor:3 };
+const SPAWN_COUNTS = { cow:4, sheep:5, dog:3, giraffe:3, lion:2, elephant:2 };
 function findSpawnSpot(seedX, seedZ){
   let x,z,h,tries=0;
   do{
@@ -1068,7 +972,6 @@ function addAnimal(type, id, spot, yawSeed){
     x:spot.x+0.5, y:gy, z:spot.z+0.5, yaw: (yawSeed!=null ? yawSeed : Math.random())*Math.PI*2,
     wanderTimer: Math.random()*2, target:null,
     aggroUntil:0, attackCooldown:0, walk:{phase:0,amp:0}, wasAggro:false,
-    predTarget:null, hopPhase:0, wasPredTarget:false, fedUntil:0,
   };
   animals.push(a);
   return a;
@@ -1104,7 +1007,6 @@ function updateRespawns(dt){
 }
 function updateAnimal(a, dt){
   const stats = ANIMAL_STATS[a.type];
-  if(stats.predator){ updatePredator(a, stats, dt); return; }
   a.attackCooldown = Math.max(0, a.attackCooldown - dt);
 
   const dxp = player.pos.x - a.x, dzp = player.pos.z - a.z;
@@ -1158,125 +1060,6 @@ function updateAnimal(a, dt){
   a.mesh.rotation.y = a.yaw;
   animateQuadrupedWalk(a.mesh, a.walk, dt, moving, isAggro?1.6:1);
 }
-// Predators (T-Rex, raptors) hunt the player AND other animals, rather than just reacting to the
-// player. They scan for the nearest valid target within range; raptors additionally check whether
-// a packmate already has a target and adopt it, so all three converge on the same prey together.
-function findPredatorTarget(a){
-  let best = null, bestDist = PREDATOR_DETECT_RADIUS;
-  const pdx = player.pos.x-a.x, pdz = player.pos.z-a.z, pdist = Math.hypot(pdx,pdz);
-  if(pdist < bestDist){ best = {type:'player'}; bestDist = pdist; }
-  animals.forEach(other=>{
-    if(other===a) return;
-    if(ANIMAL_STATS[other.type].predator) return; // predators don't hunt each other
-    const dx=other.x-a.x, dz=other.z-a.z, dist=Math.hypot(dx,dz);
-    if(dist < bestDist){ best = {type:'animal', ref:other}; bestDist = dist; }
-  });
-  return best;
-}
-function isPredTargetInvalid(t){
-  return t.type==='animal' && !animals.includes(t.ref);
-}
-const SATIATION_MS = 45000; // after a kill, a predator stops hunting for this long
-function predatorDamageAnimal(a, dmg){
-  a.hp = Math.max(0, a.hp - dmg);
-  if(fbReady) db.ref('world/mobs/'+a.id+'/hp').set(a.hp);
-  if(a.hp<=0){ SFX.animalDeath(); killAnimal(a); }
-}
-function wanderStep(a, stats, dt, speedMul){
-  let moving = false;
-  a.wanderTimer -= dt;
-  if(a.wanderTimer<=0){
-    a.wanderTimer = 2+Math.random()*3;
-    a.target = Math.random()<0.6
-      ? { x:a.x+(Math.random()*2-1)*4, z:a.z+(Math.random()*2-1)*4 }
-      : null;
-  }
-  if(a.target){
-    const tdx=a.target.x-a.x, tdz=a.target.z-a.z, td=Math.hypot(tdx,tdz);
-    if(td>0.15){
-      const nx=tdx/td, nz=tdz/td;
-      a.yaw = Math.atan2(-nx,-nz);
-      a.x += nx*stats.speed*dt*(speedMul||0.6);
-      a.z += nz*stats.speed*dt*(speedMul||0.6);
-      moving = true;
-    } else a.target = null;
-  }
-  return moving;
-}
-function placeGrounded(a, dt, jumping){
-  a.x = Math.max(1, Math.min(WORLD_SIZE-1, a.x));
-  a.z = Math.max(1, Math.min(WORLD_SIZE-1, a.z));
-  const groundY = groundHeightAt(a.x, a.z);
-  a.hopPhase += jumping ? dt*7 : 0;
-  const hop = jumping ? Math.max(0, Math.sin(a.hopPhase))*0.55 : 0;
-  a.y = groundY + hop;
-  a.mesh.position.set(a.x, a.y, a.z);
-  a.mesh.rotation.y = a.yaw;
-}
-function updatePredator(a, stats, dt){
-  a.attackCooldown = Math.max(0, a.attackCooldown - dt);
-  const now = performance.now();
-
-  if(now < (a.fedUntil||0)){
-    // just ate -- stop hunting for a while and wander peacefully instead
-    a.predTarget = null;
-    const moving = wanderStep(a, stats, dt);
-    placeGrounded(a, dt, false);
-    animateBipedWalk(a.mesh, a.walk, dt, moving, 1);
-    return;
-  }
-
-  if(!a.predTarget && stats.pack){
-    const packmate = animals.find(o=>o!==a && o.type===a.type && o.predTarget);
-    if(packmate) a.predTarget = packmate.predTarget;
-  }
-  if(!a.predTarget || isPredTargetInvalid(a.predTarget)){
-    a.predTarget = findPredatorTarget(a);
-  }
-
-  const hasTarget = !!a.predTarget;
-  if(hasTarget && !a.wasPredTarget){
-    if(a.type==='trex') SFX.trexRoar();
-    else if(a.type==='raptor') SFX.raptorScreech();
-  }
-  a.wasPredTarget = hasTarget;
-
-  let moving = false, jumping = false;
-  if(a.predTarget){
-    const tx = a.predTarget.type==='player' ? player.pos.x : a.predTarget.ref.x;
-    const tz = a.predTarget.type==='player' ? player.pos.z : a.predTarget.ref.z;
-    const dx=tx-a.x, dz=tz-a.z, dist=Math.hypot(dx,dz);
-    if(dist > PREDATOR_DEAGGRO_RADIUS){
-      a.predTarget = null;
-    } else if(dist>0.05){
-      const nx=dx/dist, nz=dz/dist;
-      a.yaw = Math.atan2(-nx,-nz);
-      if(dist > ATTACK_RANGE*0.4 + stats.reach){
-        a.x += nx*stats.chaseSpeed*dt;
-        a.z += nz*stats.chaseSpeed*dt;
-        moving = true;
-        if(stats.jump) jumping = true;
-      } else if(a.attackCooldown<=0){
-        if(a.predTarget.type==='player'){
-          damagePlayer(stats.dmg, a.type);
-        } else {
-          const prey = a.predTarget.ref;
-          predatorDamageAnimal(prey, stats.dmg);
-          if(prey.hp<=0){
-            a.fedUntil = now + SATIATION_MS; // ate -- full for a while
-            a.predTarget = null;
-          }
-        }
-        a.attackCooldown = stats.pack ? 0.8 : 1.3;
-      }
-    }
-  } else {
-    moving = wanderStep(a, stats, dt);
-  }
-
-  placeGrounded(a, dt, jumping);
-  animateBipedWalk(a.mesh, a.walk, dt, moving, a.predTarget ? 2.2 : 1);
-}
 function updateAnimals(dt){ animals.forEach(a=>updateAnimal(a,dt)); }
 function killAnimal(a){
   scene.remove(a.mesh);
@@ -1287,7 +1070,6 @@ function damageAnimal(a, dmg){
   a.hp = Math.max(0, a.hp - dmg);
   const stats = ANIMAL_STATS[a.type];
   if(stats.retaliate) a.aggroUntil = performance.now() + RETALIATE_MS;
-  if(stats.predator) a.predTarget = {type:'player'};
   if(fbReady) db.ref('world/mobs/'+a.id+'/hp').set(a.hp);
   if(a.hp<=0){ SFX.animalDeath(); killAnimal(a); }
 }
@@ -1346,8 +1128,8 @@ function playNoise(duration, volume, filterFreq, attack){
   src.connect(filter).connect(gain).connect(ctx.destination);
   src.start(now);
 }
-// Real recordings (public domain / CC-BY-SA, see assets/README.md) for the big predator sounds —
-// loaded once up front; each falls back to a synthesized sound if the file can't be fetched/decoded.
+// Real recording (public domain, see assets/README.md) for the lion roar — loaded once up front,
+// falls back to a synthesized growl if the file can't be fetched/decoded.
 function makeClipPlayer(url, defaultClipDuration, tailFade){
   let buffer = null;
   function load(){
@@ -1381,8 +1163,6 @@ function makeClipPlayer(url, defaultClipDuration, tailFade){
   return { load, play };
 }
 const lionRoarClip = makeClipPlayer('assets/lion-roar.ogg', 2.2, 0.35);
-const trexRoarClip = makeClipPlayer('assets/trex-roar.ogg', 3.0, 0.4);
-const raptorScreechClip = makeClipPlayer('assets/raptor-screech.mp3', 2.2, 0.15);
 function playRoar(){
   if(lionRoarClip.play()) return;
   const ctx = ensureAudio();
@@ -1438,33 +1218,6 @@ function playRoar(){
   lfo.start(now); lfo.stop(now+duration);
   noiseSrc.start(now);
 }
-function playTrexRoarSynth(){
-  const ctx = ensureAudio();
-  if(!ctx) return;
-  const now = ctx.currentTime;
-  const duration = 1.4;
-  const osc = ctx.createOscillator();
-  osc.type = 'sawtooth';
-  osc.frequency.setValueAtTime(50, now);
-  osc.frequency.linearRampToValueAtTime(85, now+0.2);
-  osc.frequency.linearRampToValueAtTime(38, now+duration);
-  const lowpass = ctx.createBiquadFilter();
-  lowpass.type = 'lowpass';
-  lowpass.frequency.setValueAtTime(280, now);
-  lowpass.frequency.linearRampToValueAtTime(650, now+0.2);
-  lowpass.frequency.linearRampToValueAtTime(180, now+duration);
-  const gain = ctx.createGain();
-  gain.gain.setValueAtTime(0.0001, now);
-  gain.gain.exponentialRampToValueAtTime(0.35, now+0.15);
-  gain.gain.exponentialRampToValueAtTime(0.0001, now+duration);
-  osc.connect(lowpass).connect(gain).connect(ctx.destination);
-  osc.start(now); osc.stop(now+duration);
-  playNoise(duration*0.8, 0.15, 300);
-}
-function playRaptorScreechSynth(){
-  playTone(1800, 0.16, 'sawtooth', 0.15, 900);
-  setTimeout(()=>playTone(2100, 0.12, 'sawtooth', 0.12, 1300), 90);
-}
 function playDoorCreak(opening){
   const ctx = ensureAudio();
   if(!ctx) return;
@@ -1509,14 +1262,10 @@ const SFX = {
   },
   death(){ playTone(300, 0.6, 'sawtooth', 0.2, 50); playNoise(0.5, 0.14, 400); },
   roar(){ playRoar(); },
-  trexRoar(){ if(!trexRoarClip.play()) playTrexRoarSynth(); },
-  raptorScreech(){ if(!raptorScreechClip.play(undefined, 0.7)) playRaptorScreechSynth(); },
   doorToggle(opening){ playDoorCreak(opening); },
   windowToggle(opening){ playWindowSlide(opening); },
 };
 lionRoarClip.load();
-trexRoarClip.load();
-raptorScreechClip.load();
 
 // ---------- Combat ----------
 let myHP = PLAYER_MAX_HP;
