@@ -2223,22 +2223,46 @@ function collidesBox(px,py,pz){
 // ---------- Entity-vs-entity collision (players & animals can't walk through each other) ----------
 // excludeAnimal: pass the animal doing the checking (so it also gets checked against the local
 // player); leave undefined when the local player itself is the one moving.
-function entityBlockedByOthers(px,pz,radius,excludeAnimal){
+// fromX/fromZ: the entity's position BEFORE this move. If given, a candidate that's still inside
+// another entity's radius is only blocked when it's not moving away from that entity (i.e. its
+// distance didn't increase). Without this, two entities that ever end up overlapping — simultaneous
+// spawns, a lagged remote position, a shove from a third entity — would deadlock: every candidate
+// position is still "inside" the other one, including every direction that would let them separate,
+// so neither side could ever move again.
+function entityBlockedByOthers(px,pz,radius,excludeAnimal,fromX,fromZ){
+  const wasMoving = fromX!=null;
   for(const a of animals){
     if(a===excludeAnimal) continue;
     const r = radius + (ANIMAL_RADIUS[a.type]||0.4);
     const dx=px-a.x, dz=pz-a.z;
-    if(dx*dx+dz*dz < r*r) return true;
+    if(dx*dx+dz*dz >= r*r) continue;
+    if(wasMoving){
+      const odx=fromX-a.x, odz=fromZ-a.z;
+      if(dx*dx+dz*dz >= odx*odx+odz*odz) continue;
+    }
+    return true;
   }
   if(excludeAnimal){
     const r = radius + player.width/2;
     const dx=px-player.pos.x, dz=pz-player.pos.z;
-    if(dx*dx+dz*dz < r*r) return true;
+    if(dx*dx+dz*dz < r*r){
+      let blocked = true;
+      if(wasMoving){
+        const odx=fromX-player.pos.x, odz=fromZ-player.pos.z;
+        if(dx*dx+dz*dz >= odx*odx+odz*odz) blocked = false;
+      }
+      if(blocked) return true;
+    }
   }
   for(const [,rp] of remotePlayers){
     const r = radius + player.width/2;
     const dx=px-rp.mesh.position.x, dz=pz-rp.mesh.position.z;
-    if(dx*dx+dz*dz < r*r) return true;
+    if(dx*dx+dz*dz >= r*r) continue;
+    if(wasMoving){
+      const odx=fromX-rp.mesh.position.x, odz=fromZ-rp.mesh.position.z;
+      if(dx*dx+dz*dz >= odx*odx+odz*odz) continue;
+    }
+    return true;
   }
   return false;
 }
@@ -2249,10 +2273,11 @@ function animalStepBlocked(nx,nz,baseY){
 }
 function stepAnimal(a,dxMove,dzMove){
   const r = ANIMAL_RADIUS[a.type]||0.4;
+  const fromX = a.x, fromZ = a.z;
   const tryX = a.x+dxMove;
-  if(!animalStepBlocked(tryX,a.z,a.y) && !entityBlockedByOthers(tryX,a.z,r,a)) a.x = tryX;
+  if(!animalStepBlocked(tryX,a.z,a.y) && !entityBlockedByOthers(tryX,a.z,r,a,fromX,fromZ)) a.x = tryX;
   const tryZ = a.z+dzMove;
-  if(!animalStepBlocked(a.x,tryZ,a.y) && !entityBlockedByOthers(a.x,tryZ,r,a)) a.z = tryZ;
+  if(!animalStepBlocked(a.x,tryZ,a.y) && !entityBlockedByOthers(a.x,tryZ,r,a,fromX,fromZ)) a.z = tryZ;
 }
 
 function getLookDir(yaw,pitch){
@@ -2290,8 +2315,9 @@ function updatePlayer(dt){
   const dx = mx*speed*dt, dz = mz*speed*dt, dy = player.vel.y*dt;
 
   const pr = player.width/2;
-  if(!collidesBox(player.pos.x+dx, player.pos.y, player.pos.z) && !entityBlockedByOthers(player.pos.x+dx, player.pos.z, pr)) player.pos.x += dx;
-  if(!collidesBox(player.pos.x, player.pos.y, player.pos.z+dz) && !entityBlockedByOthers(player.pos.x, player.pos.z+dz, pr)) player.pos.z += dz;
+  const fromX = player.pos.x, fromZ = player.pos.z;
+  if(!collidesBox(player.pos.x+dx, player.pos.y, player.pos.z) && !entityBlockedByOthers(player.pos.x+dx, player.pos.z, pr, undefined, fromX, fromZ)) player.pos.x += dx;
+  if(!collidesBox(player.pos.x, player.pos.y, player.pos.z+dz) && !entityBlockedByOthers(player.pos.x, player.pos.z+dz, pr, undefined, fromX, fromZ)) player.pos.z += dz;
   if(!collidesBox(player.pos.x, player.pos.y+dy, player.pos.z)){
     player.pos.y += dy;
     player.onGround = false;
