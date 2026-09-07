@@ -4,9 +4,11 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Blockcraft — a browser voxel sandbox</title>
-<!-- Icon placeholder: drop a 512x512 PNG at assets/icon-512.png (browsers scale it down for the tab favicon, bookmarks, and "Add to Home Screen"). -->
-<link rel="icon" type="image/png" sizes="512x512" href="assets/icon-512.png">
-<link rel="apple-touch-icon" href="assets/icon-512.png">
+<!-- The ?v= query string isn't just cosmetic: Chrome's favicon cache is keyed by this exact URL and
+     can stick to a stale/missing result (e.g. from before the file existed) even after a hard
+     reload. Bump the version if the icon ever needs to change and still isn't picking up. -->
+<link rel="icon" type="image/png" sizes="512x512" href="assets/icon-512.png?v=1">
+<link rel="apple-touch-icon" href="assets/icon-512.png?v=1">
 <style>
   html,body{margin:0;padding:0;overflow:hidden;height:100%;background:#8fd0ee;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;}
   canvas{display:block;}
