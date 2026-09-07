@@ -99,6 +99,8 @@ Players, animals, and buildings all physically block each other now — you can'
 
 Everyone who loads the page connects to the same shared world via [Firebase Realtime Database](https://firebase.google.com/docs/database) — block edits and player positions sync live between everyone currently online. GitHub Pages only serves static files, so it can't run a multiplayer server itself; Firebase's free tier fills that role instead, and the client just talks to it directly over a WebSocket.
 
+Before you play, the start screen asks for a name (saved in this browser, so you only type it once). Every player has a floating name-and-HP tag over their head, visible to everyone else in the world and kept live as their health changes.
+
 To point the game at your own Firebase project:
 
 1. Create a free project at [console.firebase.google.com](https://console.firebase.google.com).

@@ -23,6 +23,10 @@
   #overlay p{max-width:520px;line-height:1.6;opacity:0.92;font-size:15px;}
   #overlay .key{background:rgba(255,255,255,0.15);padding:2px 8px;border-radius:4px;}
   #overlay .small{margin-top:18px;font-size:12px;opacity:0.65;}
+  #nameEntry{margin-top:14px;}
+  #nameInput{font-size:16px;padding:8px 14px;border-radius:6px;border:2px solid rgba(255,255,255,0.4);background:rgba(255,255,255,0.1);color:#fff;text-align:center;width:200px;outline:none;}
+  #nameInput::placeholder{color:rgba(255,255,255,0.55);}
+  #nameInput:focus{border-color:#fff;}
   #hud{position:fixed;top:10px;left:10px;color:#fff;font-size:12px;text-shadow:0 0 3px #000;z-index:10;line-height:1.5;background:rgba(0,0,0,0.25);padding:6px 10px;border-radius:6px;pointer-events:none;}
   #hearts{position:fixed;top:10px;left:50%;transform:translateX(-50%);display:flex;gap:2px;z-index:10;filter:drop-shadow(0 0 2px rgba(0,0,0,0.7));pointer-events:none;}
   #deathMessage{position:fixed;top:35%;left:50%;transform:translate(-50%,-50%);color:#e05a4a;font-size:2em;font-weight:700;text-shadow:0 0 8px rgba(0,0,0,0.8);z-index:15;pointer-events:none;}
@@ -96,6 +100,7 @@
     <span class="key">Mouse</span> look &nbsp; <span class="key">Left click</span> break / attack &nbsp; <span class="key">Right click</span> place<br>
     <span class="key">1-0</span> select block &nbsp; <span class="key">E</span> craft at table &nbsp; <span class="key">V</span> 3rd person
   </p>
+  <div id="nameEntry"><input id="nameInput" type="text" maxlength="16" placeholder="Your name" autocomplete="off"></div>
   <p id="tapToPlay"><strong>Click anywhere to play</strong></p>
   <p id="playHint" class="small">Break blocks to gather materials, then place your Crafting Table and press E next to it to craft — including windows and doors, which you can right-click to open or close. Cows and sheep are harmless — dogs, giraffes, lions and elephants will fight back if you attack them, and lions and elephants will attack on sight if you get too close. Progress is saved automatically in this browser.</p>
 </div>

@@ -710,6 +710,40 @@ function colorForId(id){
   return new THREE.Color(`hsl(${h%360},60%,55%)`).getHex();
 }
 
+// ---------- Floating name/HP tag (drawn on a canvas, shown as a billboard sprite above the head) ----------
+function buildNameTagCanvas(name, hp, maxHp){
+  const canvas = document.createElement('canvas');
+  canvas.width = 256; canvas.height = 64;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = 'rgba(0,0,0,0.45)';
+  ctx.fillRect(2,2,252,60);
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 24px sans-serif';
+  ctx.fillText(name, 128, 28);
+  ctx.font = '18px sans-serif';
+  ctx.fillStyle = '#ff6b6b';
+  ctx.fillText('❤ ' + Math.max(0, Math.round(hp)) + '/' + maxHp, 128, 52);
+  return canvas;
+}
+function createNameTagSprite(){
+  const tex = new THREE.CanvasTexture(buildNameTagCanvas('', 0, PLAYER_MAX_HP));
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true }));
+  sprite.scale.set(1.6, 0.4, 1);
+  sprite.position.set(0, 2.05, 0);
+  return { sprite, tex, lastKey: null };
+}
+function updateNameTag(tag, name, hp, maxHp){
+  const key = name + ':' + Math.max(0, Math.round(hp));
+  if(tag.lastKey === key) return;
+  tag.lastKey = key;
+  const canvas = buildNameTagCanvas(name, hp, maxHp);
+  tag.tex.dispose();
+  tag.tex = new THREE.CanvasTexture(canvas);
+  tag.sprite.material.map = tag.tex;
+  tag.sprite.material.needsUpdate = true;
+}
+
 // ---------- Animal models (blocky quadrupeds, with procedurally-drawn hide textures) ----------
 function fillTileSized(ctx,size,baseHex){ ctx.fillStyle = rgbStr(...hexRGB(baseHex)); ctx.fillRect(0,0,size,size); }
 function speckleSized(ctx,size,baseHex,count,jitter){
@@ -1271,6 +1305,8 @@ lionRoarClip.load();
 
 // ---------- Combat ----------
 let myHP = PLAYER_MAX_HP;
+let myName = 'Player';
+try{ const savedName = localStorage.getItem('blockcraft_player_name'); if(savedName) myName = savedName; }catch(e){}
 // Regen: standing still (no movement keys held) for a bit slowly heals a half-heart at a time.
 const REGEN_IDLE_DELAY = 2;   // seconds of standing still before regen starts
 const REGEN_INTERVAL = 1.5;   // seconds between each half-heart tick while idle
@@ -1375,11 +1411,13 @@ function tryAttack(){
 
 let thirdPerson = false;
 let characterMesh;
+let myNameTag;
 const myWalkState = { phase:0, amp:0 };
 function updateCharacterAnim(dt, moving, sprinting){
   animateWalk(characterMesh, myWalkState, dt, moving, sprinting);
   characterMesh.position.set(player.pos.x, player.pos.y, player.pos.z);
   characterMesh.rotation.y = player.yaw;
+  updateNameTag(myNameTag, myName, myHP, PLAYER_MAX_HP);
 }
 
 // ---------- Multiplayer (Firebase Realtime Database) ----------
@@ -1394,10 +1432,13 @@ function addRemotePlayer(id, data){
   const mesh = createCharacterMesh(colorForId(id));
   mesh.position.set(data.x||0, data.y||0, data.z||0);
   mesh.rotation.y = data.yaw||0;
+  const nameTag = createNameTagSprite();
+  mesh.add(nameTag.sprite);
   scene.add(mesh);
   remotePlayers.set(id, {
     mesh, target:{x:data.x||0,y:data.y||0,z:data.z||0,yaw:data.yaw||0}, walk:{phase:0,amp:0},
     hp: data.hp!=null ? data.hp : PLAYER_MAX_HP,
+    name: (data.name || 'Player'), nameTag,
   });
   document.getElementById('playerCount').textContent = remotePlayers.size+1;
 }
@@ -1406,11 +1447,13 @@ function updateRemotePlayer(id, data){
   if(!e) return addRemotePlayer(id, data);
   e.target.x = data.x||0; e.target.y = data.y||0; e.target.z = data.z||0; e.target.yaw = data.yaw||0;
   if(data.hp!=null) e.hp = data.hp;
+  if(data.name) e.name = data.name;
 }
 function removeRemotePlayer(id){
   const e = remotePlayers.get(id);
   if(!e) return;
   scene.remove(e.mesh);
+  e.nameTag.tex.dispose();
   remotePlayers.delete(id);
   document.getElementById('playerCount').textContent = remotePlayers.size+1;
 }
@@ -1424,6 +1467,7 @@ function updateRemotePlayers(dt){
     e.mesh.position.z += (e.target.z - e.mesh.position.z)*t;
     e.mesh.rotation.y = shortestAngleLerp(e.mesh.rotation.y, e.target.yaw, t);
     animateWalk(e.mesh, e.walk, dt, moving, false);
+    updateNameTag(e.nameTag, e.name, e.hp, PLAYER_MAX_HP);
   });
 }
 function applyWorldEdit(x,y,z,val,fromRemote){
@@ -1495,7 +1539,7 @@ function initMultiplayer(){
     myRef.onDisconnect().remove();
     myRef.set({
       x: Math.round(player.pos.x*100)/100, y: Math.round(player.pos.y*100)/100, z: Math.round(player.pos.z*100)/100,
-      yaw: Math.round(player.yaw*100)/100, hp: myHP, t: firebase.database.ServerValue.TIMESTAMP,
+      yaw: Math.round(player.yaw*100)/100, hp: myHP, name: myName, t: firebase.database.ServerValue.TIMESTAMP,
     });
     db.ref('players/'+myId+'/hp').on('value', snap=>{
       const v = snap.val();
@@ -1824,6 +1868,11 @@ function doInteract(){
 const overlay = document.getElementById('overlay');
 const touchControls = document.getElementById('touchControls');
 let locked = false;
+const nameInput = document.getElementById('nameInput');
+nameInput.value = myName==='Player' ? '' : myName;
+nameInput.addEventListener('click', e=> e.stopPropagation());
+nameInput.addEventListener('touchstart', e=> e.stopPropagation());
+nameInput.addEventListener('keydown', e=> e.stopPropagation());
 if(isTouchDevice){
   document.body.classList.add('touch-device');
   const controlsP = document.getElementById('controlsText');
@@ -1836,6 +1885,10 @@ if(isTouchDevice){
 overlay.addEventListener('click', ()=>{
   ensureAudio();
   if(craftingOpen) return;
+  const typedName = nameInput.value.trim().slice(0,16);
+  if(typedName) myName = typedName;
+  try{ localStorage.setItem('blockcraft_player_name', myName); }catch(e){}
+  if(fbReady && myId) db.ref('players/'+myId+'/name').set(myName);
   if(isTouchDevice){
     locked = true;
     overlay.hidden = true;
@@ -2047,6 +2100,8 @@ function init(){
 
   characterMesh = createCharacterMesh();
   characterMesh.visible = false;
+  myNameTag = createNameTagSprite();
+  characterMesh.add(myNameTag.sprite);
   scene.add(characterMesh);
   buildHandModel();
   renderer.autoClear = false;
