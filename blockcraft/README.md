@@ -65,12 +65,15 @@ Blocks you break go into your inventory (shown as counts on the hotbar), and pla
 - 2 Sand → 1 Window
 - 3 Planks → 1 Door
 - 2 Stone → 1 Flint
+- 1 Stick + 1 Flint → 2 Torches
 
 The Craft button lights up once you have enough materials. Your inventory (like your world edits) is saved to `localStorage`, so it persists across reloads.
 
-## Fire
+## Fire & torches
 
 Select Flint from your hotbar (open the item picker if it isn't already assigned to a slot) and right-click a wood block to set it alight. Lighting a fire uses up one Flint. Fire burns for 30 real-world minutes — exactly half a Blockcraft day — then burns itself out; you can also put it out early by breaking the fire block directly. A burning fire gives off a warm flickering light and a soft crackling sound when you're nearby, and is synced through Firebase like any other world change, so everyone in the shared world sees the same fires burning (or going out) at the same time.
+
+Torches are the practical way to actually light up where you live: craft them with a Stick and a Flint, then place them like any other block — on the ground, on a wall, wherever. Unlike fire, a placed torch doesn't burn out; it's a permanent light source (break it to pick it back up), and it's the same warm glow whether it's day or the middle of the night, so it's the right tool for lighting a base or a path once the sun goes down.
 
 ## Windows & doors
 

@@ -18,7 +18,7 @@ const AIR=0, GRASS=1, DIRT=2, STONE=3, SAND=4, WOOD=5, LEAVES=6, PLANKS=7, WATER
 const CRAFTING_TABLE=10, BRICKS=11, STICK=12;
 const WINDOW=13, WINDOW_OPEN=14, DOOR=15, DOOR_OPEN=16;
 const SAPLING=17;
-const FLINT=18, FIRE=19;
+const FLINT=18, FIRE=19, TORCH=20;
 
 const BLOCK_COLOR = {
   [GRASS]:  0x5b8a3a,
@@ -40,18 +40,19 @@ const BLOCK_COLOR = {
   [SAPLING]: 0x5b8a3a,
   [FLINT]: 0x5c5f66,
   [FIRE]: 0xff8a2b,
+  [TORCH]: 0xd98a3d,
 };
 const BLOCK_NAME = {
   [GRASS]:'Grass', [DIRT]:'Dirt', [STONE]:'Stone', [SAND]:'Sand', [WOOD]:'Wood',
   [LEAVES]:'Leaves', [PLANKS]:'Planks', [WATER]:'Water',
   [CRAFTING_TABLE]:'Crafting Table', [BRICKS]:'Bricks', [STICK]:'Stick',
   [WINDOW]:'Window', [WINDOW_OPEN]:'Window (open)', [DOOR]:'Door', [DOOR_OPEN]:'Door (open)',
-  [SAPLING]:'Sapling', [FLINT]:'Flint', [FIRE]:'Fire',
+  [SAPLING]:'Sapling', [FLINT]:'Flint', [FIRE]:'Fire', [TORCH]:'Torch',
 };
 // Every item the player can ever select. The hotbar only shows HOTBAR_SIZE of these at a time —
 // the rest are reachable through the Items panel (the palette button, or the "I" key), which lets
 // the player swap any hotbar slot for anything in this list.
-const ALL_ITEMS = [GRASS, DIRT, STONE, SAND, WOOD, LEAVES, PLANKS, WATER, CRAFTING_TABLE, BRICKS, STICK, WINDOW, DOOR, FLINT];
+const ALL_ITEMS = [GRASS, DIRT, STONE, SAND, WOOD, LEAVES, PLANKS, WATER, CRAFTING_TABLE, BRICKS, STICK, WINDOW, DOOR, FLINT, TORCH];
 const HOTBAR_SIZE = 9;
 const DEFAULT_HOTBAR = [GRASS, DIRT, STONE, SAND, WOOD, PLANKS, CRAFTING_TABLE, DOOR, FLINT];
 const HOTBAR = DEFAULT_HOTBAR.slice();
@@ -68,12 +69,12 @@ function loadHotbar(){
 }
 // A few items are structures/tools, not plain materials — give them a distinct glyph on top of
 // their swatch so they read at a glance instead of just being "another colored square."
-const HOTBAR_ICON = { [CRAFTING_TABLE]: '🛠️', [WINDOW]: '🪟', [DOOR]: '🚪', [FLINT]: '🔥' };
+const HOTBAR_ICON = { [CRAFTING_TABLE]: '🛠️', [WINDOW]: '🪟', [DOOR]: '🚪', [FLINT]: '🔥', [TORCH]: '🕯️' };
 // Blocks with an open/closed state: right-clicking one toggles it to the other id in this map.
 const TOGGLE_MAP = { [WINDOW]:WINDOW_OPEN, [WINDOW_OPEN]:WINDOW, [DOOR]:DOOR_OPEN, [DOOR_OPEN]:DOOR };
 // Breaking the open form of a toggleable block gives you back its closed (placeable) form.
 const COLLECT_AS = { [WINDOW_OPEN]:WINDOW, [DOOR_OPEN]:DOOR };
-const COLLECTIBLE = new Set([GRASS, DIRT, STONE, SAND, WOOD, LEAVES, PLANKS, CRAFTING_TABLE, BRICKS, WINDOW, WINDOW_OPEN, DOOR, DOOR_OPEN]);
+const COLLECTIBLE = new Set([GRASS, DIRT, STONE, SAND, WOOD, LEAVES, PLANKS, CRAFTING_TABLE, BRICKS, WINDOW, WINDOW_OPEN, DOOR, DOOR_OPEN, TORCH]);
 
 // ---------- Health / combat ----------
 const HP_PER_HEART = 2;
@@ -122,6 +123,7 @@ const RECIPES = [
   { name:'Window',         out:{id:WINDOW, qty:1},         in:[{id:SAND, qty:2}] },
   { name:'Door',           out:{id:DOOR, qty:1},            in:[{id:PLANKS, qty:3}] },
   { name:'Flint',          out:{id:FLINT, qty:1},           in:[{id:STONE, qty:2}] },
+  { name:'Torch',          out:{id:TORCH, qty:2},           in:[{id:STICK, qty:1}, {id:FLINT, qty:1}] },
 ];
 const inventory = {};
 function invCount(id){ return inventory[id]||0; }
@@ -153,7 +155,8 @@ function nearestCraftingTable(maxDist){
 const TILE = 16, ATLAS_COLS = 4, ATLAS_ROWS = 6;
 const T_GRASS_TOP=0, T_GRASS_SIDE=1, T_DIRT=2, T_STONE=3, T_SAND=4, T_LOG_SIDE=5, T_LOG_TOP=6,
       T_LEAVES=7, T_PLANKS=8, T_BEDROCK=9, T_CRAFT_TOP=10, T_CRAFT_SIDE=11, T_BRICKS=12, T_WATER=13,
-      T_WINDOW=14, T_WINDOW_OPEN=15, T_DOOR=16, T_DOOR_OPEN=17, T_SAPLING=18, T_FLINT=19, T_FIRE=20;
+      T_WINDOW=14, T_WINDOW_OPEN=15, T_DOOR=16, T_DOOR_OPEN=17, T_SAPLING=18, T_FLINT=19, T_FIRE=20,
+      T_TORCH=21;
 
 function hexRGB(hex){ return [(hex>>16)&255, (hex>>8)&255, hex&255]; }
 function rgbStr(r,g,b){ return `rgb(${r|0},${g|0},${b|0})`; }
@@ -370,6 +373,18 @@ function drawFire(ctx,x0,y0){
   ctx.fillRect(x0+7,y0+5,2,3);
   speckle(ctx,x0,y0,0xff7a1a,10,20);
 }
+function drawTorch(ctx,x0,y0){
+  // near-black base + the glass bucket's transparency reads as a thin stick rather than a solid cube
+  fillTile(ctx,x0,y0,0x0a0a0a);
+  ctx.fillStyle = shadeStr(0x6b4a2b,1,6);
+  ctx.fillRect(x0+7,y0+8,2,7);
+  ctx.fillStyle = '#c62b0e';
+  ctx.fillRect(x0+5,y0+4,6,5);
+  ctx.fillStyle = '#ff9a2e';
+  ctx.fillRect(x0+6,y0+2,4,4);
+  ctx.fillStyle = '#ffd75e';
+  ctx.fillRect(x0+7,y0+1,2,3);
+}
 function buildAtlas(){
   const canvas = document.createElement('canvas');
   canvas.width = TILE*ATLAS_COLS;
@@ -377,7 +392,7 @@ function buildAtlas(){
   const ctx = canvas.getContext('2d');
   const draw = [drawGrassTop, drawGrassSide, drawDirt, drawStone, drawSand, drawLogSide, drawLogTop,
                 drawLeaves, drawPlanks, drawBedrock, drawCraftTop, drawCraftSide, drawBricks, drawWater,
-                drawWindow, drawWindowOpen, drawDoor, drawDoorOpen, drawSapling, drawFlint, drawFire];
+                drawWindow, drawWindowOpen, drawDoor, drawDoorOpen, drawSapling, drawFlint, drawFire, drawTorch];
   draw.forEach((fn, i)=> fn(ctx, (i%ATLAS_COLS)*TILE, Math.floor(i/ATLAS_COLS)*TILE));
   const tex = new THREE.CanvasTexture(canvas);
   tex.magFilter = THREE.NearestFilter;
@@ -413,6 +428,7 @@ const BLOCK_TILES = {
   [SAPLING]: {top:T_SAPLING, side:T_SAPLING, bottom:T_SAPLING},
   [FLINT]: {top:T_FLINT, side:T_FLINT, bottom:T_FLINT},
   [FIRE]: {top:T_FIRE, side:T_FIRE, bottom:T_FIRE},
+  [TORCH]: {top:T_TORCH, side:T_TORCH, bottom:T_TORCH},
 };
 // per-face-direction UV winding (0/1 flags select u0/u1 and vBottom/vTop), aligned to FACES order below
 const UV_PATTERNS = [
@@ -612,7 +628,7 @@ const glassMaterial = new THREE.MeshLambertMaterial({ vertexColors: true, side: 
 // Any block that isn't fully opaque. A face between two blocks of the SAME transparent type is
 // skipped (no point rendering the seam between two adjacent water or window blocks); a face against
 // a *different* transparent type, or against AIR, still draws.
-const TRANSPARENT_BLOCKS = new Set([WATER, WINDOW, WINDOW_OPEN, DOOR_OPEN, SAPLING, FIRE]);
+const TRANSPARENT_BLOCKS = new Set([WATER, WINDOW, WINDOW_OPEN, DOOR_OPEN, SAPLING, FIRE, TORCH]);
 function bucketFor(b){ return b===WATER ? 'water' : (TRANSPARENT_BLOCKS.has(b) ? 'glass' : 'solid'); }
 
 function buildChunkGeometries(cx,cz){
@@ -1070,7 +1086,7 @@ function animateQuadrupedWalk(group, state, dt, moving, speedMul){
 const animals = [];
 // Ground for animals excludes tree material (WOOD/LEAVES) so they never end up standing in a
 // tree's trunk or canopy — only natural terrain and player-built blocks count as "ground".
-function isAnimalGround(b){ return b!==AIR && b!==WATER && b!==WOOD && b!==LEAVES && b!==WINDOW_OPEN && b!==DOOR_OPEN && b!==SAPLING && b!==FIRE; }
+function isAnimalGround(b){ return b!==AIR && b!==WATER && b!==WOOD && b!==LEAVES && b!==WINDOW_OPEN && b!==DOOR_OPEN && b!==SAPLING && b!==FIRE && b!==TORCH; }
 function groundHeightAt(x,z){
   const bx=Math.floor(x), bz=Math.floor(z);
   for(let y=WORLD_HEIGHT-1;y>=0;y--){
@@ -1590,9 +1606,37 @@ function applyWorldEdit(x,y,z,val,fromRemote){
   const k = x+','+y+','+z;
   edits.set(k, val);
   if(val===CRAFTING_TABLE) craftingTables.add(k); else craftingTables.delete(k);
+  updateTorchLight(x,y,z,val);
   onBlockChanged(x,y,z);
   saveEdits();
   if(!fromRemote && fbReady) db.ref('world/edits/'+k).set(val);
+}
+// Torches are permanent (unlike fire) — no lifecycle to track, just a light that follows the block.
+// Placement/breaking (local or synced from another player) always goes through applyWorldEdit above,
+// so hooking the light there covers every case except the very first load, handled by
+// restoreTorchLights() once after loadEdits() populates the world from localStorage.
+const torchLights = new Map();
+function updateTorchLight(x,y,z,val){
+  const key = x+','+y+','+z;
+  if(val===TORCH){
+    if(!torchLights.has(key)){
+      const light = new THREE.PointLight(0xffb060, 1.1, 8, 2);
+      light.position.set(x+0.5, y+0.7, z+0.5);
+      scene.add(light);
+      torchLights.set(key, light);
+    }
+  } else if(torchLights.has(key)){
+    scene.remove(torchLights.get(key));
+    torchLights.delete(key);
+  }
+}
+function restoreTorchLights(){
+  edits.forEach((val,key)=>{
+    if(val===TORCH){
+      const [x,y,z] = key.split(',').map(Number);
+      updateTorchLight(x,y,z,val);
+    }
+  });
 }
 // When a trunk block is cut, whatever wood+leaves are left connected to it but no longer resting on
 // anything solid (the ground, or a block outside the cut cluster) breaks free and actually falls —
@@ -2162,7 +2206,7 @@ function updateHandView(dt, moving, sprinting){
 
 function blockSolid(bx,by,bz){
   const b = getBlock(bx,by,bz);
-  return b!==AIR && b!==WATER && b!==WINDOW_OPEN && b!==DOOR_OPEN && b!==SAPLING && b!==FIRE;
+  return b!==AIR && b!==WATER && b!==WINDOW_OPEN && b!==DOOR_OPEN && b!==SAPLING && b!==FIRE && b!==TORCH;
 }
 function collidesBox(px,py,pz){
   const w = player.width/2;
@@ -2736,6 +2780,7 @@ function init(){
 
   generateWorld();
   loadEdits();
+  restoreTorchLights();
   loadInventory();
   loadHotbar();
   rebuildAllChunks();
