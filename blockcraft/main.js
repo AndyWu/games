@@ -2199,6 +2199,88 @@ function triggerLightning(){
   setTimeout(()=> SFX.thunder(), 300+Math.random()*1200);
 }
 
+// ---------- Fireflies: small glowing ambiance, only out after dark ----------
+// A fixed pool that's always recycled to wherever the player currently is (same trick as rain),
+// so there's always a scattering of them nearby instead of only near world origin. Each blinks on
+// an independent cycle (a sine wave raised to a power, so it snaps into short bright pulses with
+// long dark gaps rather than smoothly breathing) and drifts lazily around its own "home" spot.
+const FIREFLY_COUNT = 26;
+const FIREFLY_RADIUS = 22; // recycle a firefly's home once it's this far (in x/z) from the player
+let fireflyGlowTexture = null;
+function buildFireflyGlowTexture(){
+  const S = 32;
+  const canvas = document.createElement('canvas');
+  canvas.width = S; canvas.height = S;
+  const ctx = canvas.getContext('2d');
+  const grad = ctx.createRadialGradient(S/2,S/2,0, S/2,S/2,S/2);
+  grad.addColorStop(0, 'rgba(255,255,210,1)');
+  grad.addColorStop(0.35, 'rgba(215,255,140,0.9)');
+  grad.addColorStop(1, 'rgba(215,255,140,0)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0,0,S,S);
+  return new THREE.CanvasTexture(canvas);
+}
+const fireflies = [];
+function spawnFireflyHome(f){
+  let x,z,gy,tries=0;
+  do{
+    const ang = Math.random()*Math.PI*2, r = 6+Math.random()*16;
+    x = player.pos.x + Math.cos(ang)*r;
+    z = player.pos.z + Math.sin(ang)*r;
+    gy = heightAt(Math.floor(x), Math.floor(z));
+    tries++;
+  } while(gy<=SEA_LEVEL && tries<8); // steer away from open water where reasonably possible
+  f.homeX = x; f.homeZ = z;
+  f.baseY = gy + 1.2 + Math.random()*1.6;
+}
+function ensureFireflies(){
+  if(fireflies.length) return;
+  if(!fireflyGlowTexture) fireflyGlowTexture = buildFireflyGlowTexture();
+  for(let i=0;i<FIREFLY_COUNT;i++){
+    const mat = new THREE.SpriteMaterial({ map:fireflyGlowTexture, transparent:true, opacity:0, blending:THREE.AdditiveBlending, depthWrite:false });
+    const sprite = new THREE.Sprite(mat);
+    sprite.scale.set(0.45,0.45,1);
+    scene.add(sprite);
+    const light = new THREE.PointLight(0xccff66, 0, 3.5, 2);
+    scene.add(light);
+    const f = {
+      sprite, light, homeX:0, homeZ:0, baseY:0,
+      freqX: 0.2+Math.random()*0.3, freqY: 0.3+Math.random()*0.4, freqZ: 0.2+Math.random()*0.3,
+      ampXZ: 1.2+Math.random()*1.8, ampY: 0.5+Math.random()*0.7, phase: Math.random()*Math.PI*2,
+      blinkSpeed: 1.2+Math.random()*1.6, blinkPhase: Math.random()*Math.PI*2,
+    };
+    spawnFireflyHome(f);
+    fireflies.push(f);
+  }
+}
+// 1 through the heart of the night, fading out around dawn and back in around dusk, 0 all day —
+// mirrors the sunrise/sunset windows in DAY_KEYFRAMES above (~0.20-0.32 and ~0.68-0.80).
+function fireflyNightFactor(){
+  const t = currentDayTime();
+  if(t>=0.80 || t<0.20) return 1;
+  if(t<0.32) return Math.max(0, 1-(t-0.20)/0.12);
+  if(t>=0.68) return Math.max(0, (t-0.68)/0.12);
+  return 0;
+}
+function updateFireflies(dt){
+  ensureFireflies();
+  const night = fireflyNightFactor();
+  const t = performance.now()/1000;
+  for(const f of fireflies){
+    const dx = f.homeX-player.pos.x, dz = f.homeZ-player.pos.z;
+    if(dx*dx+dz*dz > FIREFLY_RADIUS*FIREFLY_RADIUS) spawnFireflyHome(f);
+    const x = f.homeX + Math.sin(t*f.freqX+f.phase)*f.ampXZ;
+    const z = f.homeZ + Math.cos(t*f.freqZ+f.phase*1.3)*f.ampXZ;
+    const y = f.baseY + Math.sin(t*f.freqY+f.phase*0.7)*f.ampY;
+    f.sprite.position.set(x,y,z);
+    f.light.position.set(x,y,z);
+    const blink = Math.pow(Math.max(0, Math.sin(t*f.blinkSpeed+f.blinkPhase)), 4);
+    const vis = blink*night;
+    f.sprite.material.opacity = vis*0.9;
+    f.light.intensity = vis*0.9;
+  }
+}
+
 // ---------- Saplings: little trees that randomly appear on grass and slowly grow into full trees ----------
 const SAPLING_MAX_STAGE = 3;          // height in blocks while still growing, before it becomes a real tree
 const SAPLING_STAGE_MS = 40000;       // real time between each extra block of height
@@ -3379,6 +3461,7 @@ function animate(now){
   updateSaplings(dt);
   updateFires(dt);
   updateFireworks(dt);
+  updateFireflies(dt);
   heldTorchLight.visible = HOTBAR[selectedSlot]===TORCH;
   if(heldTorchLight.visible) heldTorchLight.intensity = 1.0 + Math.random()*0.3;
   updateDayNight();
