@@ -716,7 +716,7 @@ function loadInventory(){
 }
 
 // ---------- Chunked mesh building ----------
-let scene, camera, renderer, hemiLight, sunLight;
+let scene, camera, renderer, hemiLight, sunLight, heldTorchLight;
 const chunkMeshes = new Map();
 function chunkKey(cx,cz){ return cx+','+cz; }
 
@@ -769,7 +769,10 @@ function buildChunkGeometries(cx,cz){
       const skyExposed = computeSkyExposure(x,z);
       for(let y=0;y<WORLD_HEIGHT;y++){
         const b = getBlock(x,y,z);
-        if(b===AIR) continue;
+        // Fire is rendered as its own non-solid crossed-billboard sprite (see ensureFireFx), not as
+        // a cube face — it stays in TRANSPARENT_BLOCKS so it still doesn't occlude neighbors or block
+        // sky exposure, but it no longer gets meshed into the chunk itself.
+        if(b===AIR || b===FIRE) continue;
         const bucket = buckets[bucketFor(b)];
         const tiles = BLOCK_TILES[b];
         const indoorF = skyExposed[y] ? 1.0 : INDOOR_DARK_FACTOR;
@@ -2244,9 +2247,52 @@ function updateSaplings(dt){
 }
 
 // ---------- Fire: light a wood block with flint, burns for half a Blockcraft day (30 real min) ----------
+// Fire is a non-solid hazard, not a block you can stand on or bump into (see blockSolid/TRANSPARENT_
+// BLOCKS): it's drawn as two crossed billboard sprites rather than a cube (ensureFireFx), it hurts
+// any player or animal standing in its cell, and it can catch adjacent wood/leaves alight — so a
+// single flint spark can grow into a real, spreading blaze rather than a single static block.
 const FIRE_DURATION_MS = 1800000; // 30 real minutes == half a 1-hour Blockcraft day
+const FLAMMABLE_BLOCKS = new Set([WOOD, LEAVES]);
+const FIRE_SPREAD_INTERVAL_S = 4;
+const FIRE_SPREAD_CHANCE = 0.12;
+const MAX_ACTIVE_FIRES = 60; // caps runaway spread so light/sprite count stays cheap to render
+const FIRE_DAMAGE_TICK_S = 1;
+const FIRE_DAMAGE = 2;
+const FIRE_NEIGHBOR_OFFSETS = [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]];
 const fires = new Map(); // key "x,y,z" -> {ignitedAt: ms-since-epoch}
-const fireLights = new Map();
+const fireFx = new Map(); // key -> { light, flame, phase }
+
+// A small transparent-background sprite (not a full opaque tile like the other block textures) so
+// the crossed billboards read as a flame silhouette instead of a translucent cube.
+function buildFireSpriteTexture(){
+  const W = 32, H = 48;
+  const canvas = document.createElement('canvas');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+  const cx = W/2;
+  for(let row=0; row<H; row++){
+    const frac = 1 - row/(H-1); // 1 at the base, 0 at the tip
+    const taper = Math.pow(frac, 0.65);
+    const jag = (Math.sin(row*1.7)*0.5 + (Math.random()-0.5)) * W*0.09;
+    const half = Math.max(1, W*0.46*taper + jag);
+    const x0 = Math.round(cx-half), x1 = Math.round(cx+half);
+    const color = frac>0.7 ? 0xff3d12 : (frac>0.35 ? 0xff8a1a : 0xffd24d);
+    for(let x=x0; x<x1; x++){
+      if(x<0 || x>=W) continue;
+      const hot = Math.random()<0.15;
+      ctx.fillStyle = shadeStr(hot ? 0xfff2b0 : color, 1, hot?0:14);
+      ctx.fillRect(x,row,1,1);
+    }
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.magFilter = THREE.NearestFilter;
+  tex.minFilter = THREE.NearestFilter;
+  tex.generateMipmaps = false;
+  return tex;
+}
+const fireFlameMaterial = new THREE.MeshBasicMaterial({ map: buildFireSpriteTexture(), alphaTest:0.5, side:THREE.DoubleSide });
+const fireFlameGeo = new THREE.PlaneGeometry(0.95, 1.0);
+
 function tryIgniteFire(hit){
   if(!hit || !hit.prev) return;
   if(getBlock(hit.x,hit.y,hit.z)!==WOOD) return; // flint only catches wood
@@ -2271,10 +2317,10 @@ function extinguishFire(key){
   const [x,y,z] = key.split(',').map(Number);
   if(getBlock(x,y,z)===FIRE) applyWorldEdit(x,y,z,AIR,false);
   fires.delete(key);
-  removeFireLight(key);
+  removeFireFx(key);
   if(fbReady) db.ref('world/fires/'+key).remove();
 }
-let fireTickTimer = 0;
+let fireTickTimer = 0, fireSpreadTimer = 0, fireDamageTimer = 0;
 function updateFires(dt){
   fireTickTimer -= dt;
   if(fireTickTimer<=0){
@@ -2284,12 +2330,50 @@ function updateFires(dt){
       if(now - info.ignitedAt >= FIRE_DURATION_MS) extinguishFire(key);
     }
   }
+
+  fireSpreadTimer -= dt;
+  if(fireSpreadTimer<=0){
+    fireSpreadTimer = FIRE_SPREAD_INTERVAL_S;
+    for(const key of Array.from(fires.keys())){
+      if(fires.size>=MAX_ACTIVE_FIRES) break;
+      const [x,y,z] = key.split(',').map(Number);
+      for(const [dx,dy,dz] of FIRE_NEIGHBOR_OFFSETS){
+        if(fires.size>=MAX_ACTIVE_FIRES) break;
+        const nx=x+dx, ny=y+dy, nz=z+dz;
+        if(!FLAMMABLE_BLOCKS.has(getBlock(nx,ny,nz))) continue;
+        if(fires.has(nx+','+ny+','+nz)) continue;
+        if(Math.random()<FIRE_SPREAD_CHANCE) igniteFire(nx,ny,nz);
+      }
+    }
+  }
+
+  fireDamageTimer -= dt;
+  if(fireDamageTimer<=0){
+    fireDamageTimer = FIRE_DAMAGE_TICK_S;
+    if(locked && !isDead){
+      for(const key of fires.keys()){
+        const [x,y,z] = key.split(',').map(Number);
+        if(playerOverlapsCell(x,y,z)){ damagePlayer(FIRE_DAMAGE,'fire'); break; }
+      }
+    }
+    for(const a of animals){
+      for(const key of fires.keys()){
+        const [x,y,z] = key.split(',').map(Number);
+        if(animalOverlapsCell(a,x,y,z)){ damageAnimal(a, FIRE_DAMAGE); break; }
+      }
+    }
+  }
+
+  const t = performance.now()/1000;
   for(const [key, info] of fires){
     const [x,y,z] = key.split(',').map(Number);
-    const light = ensureFireLight(key,x,y,z);
-    light.intensity = 1.1 + Math.random()*0.5;
+    const fx = ensureFireFx(key,x,y,z);
+    fx.light.intensity = 2.6 + Math.random()*0.8;
+    const wob = Math.sin(t*9 + fx.phase);
+    fx.flame.scale.set(1 + wob*0.06, 1 + Math.sin(t*6+fx.phase*1.3)*0.08, 1 + wob*0.06);
+    fx.flame.rotation.y = Math.sin(t*3 + fx.phase)*0.25;
   }
-  for(const key of Array.from(fireLights.keys())) if(!fires.has(key)) removeFireLight(key);
+  for(const key of Array.from(fireFx.keys())) if(!fires.has(key)) removeFireFx(key);
 
   fireCrackleTimer -= dt;
   if(fireCrackleTimer<=0){
@@ -2303,19 +2387,29 @@ function updateFires(dt){
   }
 }
 let fireCrackleTimer = 1;
-function ensureFireLight(key,x,y,z){
-  let light = fireLights.get(key);
-  if(!light){
-    light = new THREE.PointLight(0xff8a2b, 1.3, 9, 2);
+function ensureFireFx(key,x,y,z){
+  let fx = fireFx.get(key);
+  if(!fx){
+    const light = new THREE.PointLight(0xff8a2b, 2.6, 16, 1.4);
     light.position.set(x+0.5, y+0.5, z+0.5);
     scene.add(light);
-    fireLights.set(key, light);
+
+    const flame = new THREE.Group();
+    const p1 = new THREE.Mesh(fireFlameGeo, fireFlameMaterial);
+    const p2 = new THREE.Mesh(fireFlameGeo, fireFlameMaterial);
+    p2.rotation.y = Math.PI/2;
+    flame.add(p1, p2);
+    flame.position.set(x+0.5, y+0.5, z+0.5);
+    scene.add(flame);
+
+    fx = { light, flame, phase: Math.random()*Math.PI*2 };
+    fireFx.set(key, fx);
   }
-  return light;
+  return fx;
 }
-function removeFireLight(key){
-  const light = fireLights.get(key);
-  if(light){ scene.remove(light); fireLights.delete(key); }
+function removeFireFx(key){
+  const fx = fireFx.get(key);
+  if(fx){ scene.remove(fx.light); scene.remove(fx.flame); fireFx.delete(key); }
 }
 
 function findDoorCells(x,y,z){
@@ -2419,7 +2513,7 @@ function initMultiplayer(){
     });
     db.ref('world/fires').on('child_removed', snap=>{
       fires.delete(snap.key);
-      removeFireLight(snap.key);
+      removeFireFx(snap.key);
     });
 
     db.ref('players').on('child_added', snap=>{
@@ -2690,6 +2784,11 @@ function playerOverlapsCell(x,y,z){
   const w = player.width/2;
   const px=player.pos.x, py=player.pos.y, pz=player.pos.z;
   return (x+1>px-w && x<px+w && z+1>pz-w && z<pz+w && y<py+player.height && y+1>py);
+}
+function animalOverlapsCell(a,x,y,z){
+  const r = ANIMAL_RADIUS[a.type]||0.4;
+  const h = ANIMAL_REAL_HEIGHT[a.type]||0.8;
+  return (x+1>a.x-r && x<a.x+r && z+1>a.z-r && z<a.z+r && y<a.y+h && y+1>a.y);
 }
 function placeDoor(hit){
   const {x,y,z} = hit.prev;
@@ -3088,6 +3187,13 @@ function init(){
   camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, FAR);
   camera.rotation.order = 'YXZ';
 
+  // Lights up around you while a Torch is your held item, same warm glow as a placed one — off
+  // otherwise. A child of the camera so it always tracks wherever you're looking/standing for free.
+  heldTorchLight = new THREE.PointLight(0xffb060, 1.1, 8, 2);
+  heldTorchLight.visible = false;
+  camera.add(heldTorchLight);
+  scene.add(camera);
+
   renderer = new THREE.WebGLRenderer({ antialias:true });
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
@@ -3151,6 +3257,8 @@ function animate(now){
   updateFallingClusters(dt);
   updateSaplings(dt);
   updateFires(dt);
+  heldTorchLight.visible = HOTBAR[selectedSlot]===TORCH;
+  if(heldTorchLight.visible) heldTorchLight.intensity = 1.0 + Math.random()*0.3;
   updateDayNight();
   updateWeather(dt);
   updateTemperature(dt);

@@ -75,7 +75,11 @@ The Craft button lights up once you have enough materials. Your inventory (like 
 
 Select Flint from your hotbar (open the item picker if it isn't already assigned to a slot) and right-click a wood block to set it alight. Lighting a fire uses up one Flint. Fire burns for 30 real-world minutes — exactly half a Blockcraft day — then burns itself out; you can also put it out early by breaking the fire block directly. A burning fire gives off a warm flickering light and a soft crackling sound when you're nearby, and is synced through Firebase like any other world change, so everyone in the shared world sees the same fires burning (or going out) at the same time.
 
+Fire isn't a solid block — it's a flickering, non-solid flame you can walk straight through, not something you can stand on or bump into. Standing in it hurts (both you and any nearby animal), so it's a real hazard, not just decoration. And fire spreads: every few seconds, a burning cell has a chance to catch any adjacent wood or leaves alight too, so a single spark next to a tree or a wooden structure can genuinely grow into a spreading blaze — keep flammable buildings away from anything you set on fire, or you may lose more than you meant to.
+
 Torches are the practical way to actually light up where you live: craft them with a Stick and a Flint, then place them like any other block — on the ground, on a wall, wherever. Unlike fire, a placed torch doesn't burn out; it's a permanent light source (break it to pick it back up), and it's the same warm glow whether it's day or the middle of the night, so it's the right tool for lighting a base or a path once the sun goes down.
+
+You don't have to place one to benefit from it, either — simply having a Torch selected as your current hotbar item lights up the area around you as you walk, so you can explore a cave or find your way home at night without needing to plant torches along the whole route.
 
 ## Windows & doors
 
