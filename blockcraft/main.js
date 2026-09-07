@@ -887,7 +887,8 @@ function buildMinimapTerrain(){
 }
 // Points in the direction the character is actually facing (same forward-vector convention used
 // for door placement: (-sin(yaw), -cos(yaw))), so at a glance you can tell which way someone's
-// looking, not just where they are.
+// looking, not just where they are. A thick black outline followed by a thin white one gives every
+// triangle a high-contrast border that stays legible over any terrain color underneath it.
 function drawMinimapTriangle(px,py,yaw,size,fillColor){
   const fx = -Math.sin(yaw), fz = -Math.cos(yaw);
   const rx = Math.cos(yaw), rz = -Math.sin(yaw);
@@ -898,27 +899,11 @@ function drawMinimapTriangle(px,py,yaw,size,fillColor){
   minimapCtx.closePath();
   minimapCtx.fillStyle = fillColor;
   minimapCtx.fill();
-  minimapCtx.lineWidth = 1;
-  minimapCtx.strokeStyle = 'rgba(0,0,0,0.7)';
+  minimapCtx.lineWidth = 2.5;
+  minimapCtx.strokeStyle = '#000';
   minimapCtx.stroke();
-}
-function drawMinimapStar(px,py,outerR,fillColor){
-  const spikes = 5, innerR = outerR*0.45;
-  let rot = -Math.PI/2; // start pointing straight up
-  const step = Math.PI/spikes;
-  minimapCtx.beginPath();
-  minimapCtx.moveTo(px+Math.cos(rot)*outerR, py+Math.sin(rot)*outerR);
-  for(let i=0;i<spikes;i++){
-    rot += step;
-    minimapCtx.lineTo(px+Math.cos(rot)*innerR, py+Math.sin(rot)*innerR);
-    rot += step;
-    minimapCtx.lineTo(px+Math.cos(rot)*outerR, py+Math.sin(rot)*outerR);
-  }
-  minimapCtx.closePath();
-  minimapCtx.fillStyle = fillColor;
-  minimapCtx.fill();
   minimapCtx.lineWidth = 1;
-  minimapCtx.strokeStyle = 'rgba(0,0,0,0.7)';
+  minimapCtx.strokeStyle = '#fff';
   minimapCtx.stroke();
 }
 function drawMinimapLabel(px,py,text){
@@ -943,7 +928,7 @@ function updateMinimap(){
   });
   if(!isDead){
     const px = (player.pos.x/WORLD_SIZE)*S, py = (player.pos.z/WORLD_SIZE)*S;
-    drawMinimapStar(px,py,6,'#fff2b0');
+    drawMinimapTriangle(px,py,player.yaw,6,'#fff2b0');
     drawMinimapLabel(px, py+8, myName || 'You');
   }
 }
