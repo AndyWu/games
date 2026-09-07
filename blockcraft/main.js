@@ -2134,8 +2134,12 @@ const SEASONS = [
   { id:'winter', label:'Winter', avgF:20 },
 ];
 const DAILY_TEMP_SWING_F = 18; // +/- this many degrees between noon and midnight
-const COLD_DANGER_F = 10, HOT_DANGER_F = 100;
-const TEMP_DAMAGE_TICK_S = 4;
+// Two danger tiers per direction: past DANGER_F you lose HP slowly, past the more extreme SUPER_F
+// you lose it rapidly — both a higher per-tick amount and a shorter tick interval.
+const COLD_DANGER_F = 20, COLD_SUPER_F = 0;
+const HOT_DANGER_F = 105, HOT_SUPER_F = 110;
+const TEMP_DAMAGE_TICK_S = 4, TEMP_DAMAGE_TICK_SUPER_S = 2;
+const TEMP_DAMAGE_MILD = 1, TEMP_DAMAGE_SUPER = 4;
 function currentSeasonBlend(){
   const t = Date.now()/1000;
   const yearT = ((t % YEAR_LENGTH_S) + YEAR_LENGTH_S) % YEAR_LENGTH_S;
@@ -2175,9 +2179,9 @@ function updateTemperature(dt){
   const { to } = currentSeasonBlend();
   const tempF = currentTemperatureF();
   const outdoors = isPositionSkyExposed(player.pos.x, player.pos.y+player.eye, player.pos.z);
-  let danger = null;
-  if(tempF < COLD_DANGER_F) danger = 'cold';
-  else if(tempF > HOT_DANGER_F) danger = 'hot';
+  let danger = null, severe = false;
+  if(tempF < COLD_DANGER_F){ danger = 'cold'; severe = tempF < COLD_SUPER_F; }
+  else if(tempF > HOT_DANGER_F){ danger = 'hot'; severe = tempF > HOT_SUPER_F; }
   const inPeril = danger && outdoors && locked && !isDead;
 
   if(to.label !== lastSeasonLabel){
@@ -2188,18 +2192,21 @@ function updateTemperature(dt){
   const tempEl = document.getElementById('tempLabel');
   if(tempEl){
     let text = `${Math.round(tempF)}°F`;
-    if(inPeril) text += danger==='cold' ? ' ❄ Freezing!' : ' 🔥 Overheating!';
+    if(inPeril){
+      if(danger==='cold') text += severe ? ' ❄ Severe Frostbite!' : ' ❄ Freezing!';
+      else text += severe ? ' 🔥 Heatstroke!' : ' 🔥 Overheating!';
+    }
     tempEl.textContent = text;
     tempEl.classList.toggle('danger', !!inPeril);
   }
 
   tempDamageTimer -= dt;
   if(tempDamageTimer<=0){
-    tempDamageTimer = TEMP_DAMAGE_TICK_S;
     if(inPeril){
-      const extremity = danger==='cold' ? (COLD_DANGER_F-tempF) : (tempF-HOT_DANGER_F);
-      const dmg = Math.min(4, 1+Math.floor(extremity/6));
-      damagePlayer(dmg, 'temperature');
+      tempDamageTimer = severe ? TEMP_DAMAGE_TICK_SUPER_S : TEMP_DAMAGE_TICK_S;
+      damagePlayer(severe ? TEMP_DAMAGE_SUPER : TEMP_DAMAGE_MILD, 'temperature');
+    } else {
+      tempDamageTimer = TEMP_DAMAGE_TICK_S;
     }
   }
 }
