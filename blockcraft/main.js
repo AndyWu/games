@@ -538,9 +538,35 @@ function spawnPlayer(){
 }
 
 // ---------- Blocky character model (the player's own body, and other connected players) ----------
+function buildFaceTexture(){
+  const size = 16;
+  const canvas = document.createElement('canvas');
+  canvas.width = size; canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = 'rgb(217,160,102)';
+  ctx.fillRect(0,0,size,size);
+  ctx.fillStyle = 'rgb(45,32,26)';
+  ctx.fillRect(3,6,3,3);
+  ctx.fillRect(10,6,3,3);
+  ctx.fillStyle = 'rgb(250,250,250)';
+  ctx.fillRect(4,6,1,1);
+  ctx.fillRect(11,6,1,1);
+  ctx.fillStyle = 'rgb(140,85,70)';
+  ctx.fillRect(6,11,4,2);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.magFilter = THREE.NearestFilter;
+  tex.minFilter = THREE.NearestFilter;
+  tex.generateMipmaps = false;
+  return tex;
+}
+const skinMaterial = new THREE.MeshLambertMaterial({ color: 0xd9a066 });
+const faceMaterial = new THREE.MeshLambertMaterial({ map: buildFaceTexture() });
+// BoxGeometry material order is +x,-x,+y,-y,+z,-z; index 5 (-z) is the character's forward side,
+// matching yaw=0 facing -Z (same convention as getLookDir/the camera).
+const headMaterials = [skinMaterial, skinMaterial, skinMaterial, skinMaterial, skinMaterial, faceMaterial];
+
 function createCharacterMesh(shirtColor){
   const group = new THREE.Group();
-  const skinMat = new THREE.MeshLambertMaterial({ color: 0xd9a066 });
   const shirtMat = new THREE.MeshLambertMaterial({ color: shirtColor!==undefined ? shirtColor : 0x3b6ea5 });
   const pantsMat = new THREE.MeshLambertMaterial({ color: 0x3a3a3a });
 
@@ -550,7 +576,7 @@ function createCharacterMesh(shirtColor){
     return new THREE.Mesh(geo, mat);
   }
 
-  const head = box(0.5,0.5,0.5, skinMat);
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.5,0.5,0.5), headMaterials);
   head.position.set(0, 1.55, 0);
   const body = box(0.5,0.75,0.28, shirtMat);
   body.position.set(0, 1.05, 0);
