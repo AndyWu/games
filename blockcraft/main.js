@@ -638,14 +638,15 @@ function generateWorld(){
     for(let z=2;z<WORLD_SIZE-2;z++){
       const h = heightAt(x,z);
       if(h>SEA_LEVEL && getBlock(x,h,z)===GRASS && hash2(x,z) < 0.012){
-        plantTree(x,h+1,z);
+        if(hash2(x+3,z+5) < BUSH_CHANCE) plantBush(x,h+1,z); else plantTree(x,h+1,z);
       }
     }
   }
 }
-// writeFn(bx,by,bz,block,unconditional) decides how each cell actually gets written — plantTree uses
-// a raw setBlock (fast, unsynced — fine for deterministic world-gen), plantTreeSynced routes through
-// applyWorldEdit so a sapling maturing at runtime is persisted/synced/rendered like any other edit.
+// writeFn(bx,by,bz,block,unconditional) decides how each cell actually gets written — plantTree/
+// plantBush use a raw setBlock (fast, unsynced — fine for deterministic world-gen), the *Synced
+// variants route through applyWorldEdit so a sapling maturing at runtime is persisted/synced/
+// rendered like any other edit.
 function plantTreeCells(x,y,z,writeFn){
   const height = 4 + Math.floor(hash2(x+1,z+1)*3);
   for(let i=0;i<height;i++) writeFn(x,y+i,z,WOOD,true);
@@ -668,6 +669,30 @@ function plantTree(x,y,z){
 }
 function plantTreeSynced(x,y,z){
   plantTreeCells(x,y,z,(bx,by,bz,b,unconditional)=>{
+    if(unconditional || getBlock(bx,by,bz)===AIR) applyWorldEdit(bx,by,bz,b,false);
+  });
+}
+// A squat, trunk-less leaf clump (1-2 blocks tall, vs. a tree's 4-6) so the world isn't wall-to-wall
+// tall trees — the same low shrub you'd expect scattered between them.
+const BUSH_CHANCE = 0.4; // fraction of natural-growth spots that become a bush instead of a tree
+function plantBushCells(x,y,z,writeFn){
+  writeFn(x,y,z,LEAVES,true);
+  for(let dx=-1;dx<=1;dx++){
+    for(let dz=-1;dz<=1;dz++){
+      if(dx===0 && dz===0) continue;
+      if(Math.abs(dx)===1 && Math.abs(dz)===1 && hash2(x+dx*3+13,z+dz*5+17) < 0.4) continue;
+      writeFn(x+dx, y, z+dz, LEAVES, false);
+    }
+  }
+  if(hash2(x+7,z+11) < 0.5) writeFn(x, y+1, z, LEAVES, false);
+}
+function plantBush(x,y,z){
+  plantBushCells(x,y,z,(bx,by,bz,b,unconditional)=>{
+    if(unconditional || getBlock(bx,by,bz)===AIR) setBlock(bx,by,bz,b);
+  });
+}
+function plantBushSynced(x,y,z){
+  plantBushCells(x,y,z,(bx,by,bz,b,unconditional)=>{
     if(unconditional || getBlock(bx,by,bz)===AIR) applyWorldEdit(bx,by,bz,b,false);
   });
 }
@@ -2376,8 +2401,8 @@ function updateFireflies(dt){
 
 // ---------- Saplings: little trees that randomly appear on grass and slowly grow into full trees ----------
 const SAPLING_MAX_STAGE = 3;          // height in blocks while still growing, before it becomes a real tree
-const SAPLING_STAGE_MS = 40000;       // real time between each extra block of height
-const SAPLING_MATURE_MS = 300000;     // real time (5 min) from planting until it becomes a full tree
+const SAPLING_STAGE_MS = 400000;      // real time between each extra block of height (10x slower)
+const SAPLING_MATURE_MS = 3000000;    // real time (50 min) from planting until it becomes a full tree (10x slower)
 const SAPLING_CAP = 30;               // roughly how many can be growing across the map at once
 const SAPLING_SPAWN_CHECK_S = 15;     // how often each client rolls the dice on spawning a new one
 const saplings = new Map(); // key "x,z" -> {y: baseY, plantedAt: ms-since-epoch}
@@ -2431,7 +2456,7 @@ function updateSaplings(dt){
         for(let dy=0; dy<SAPLING_MAX_STAGE; dy++){
           if(getBlock(x,y+dy,z)===SAPLING) applyWorldEdit(x,y+dy,z,AIR,false);
         }
-        plantTreeSynced(x,y,z);
+        if(hash2(x+3,z+5) < BUSH_CHANCE) plantBushSynced(x,y,z); else plantTreeSynced(x,y,z);
         saplings.delete(key);
         if(fbReady) db.ref('world/saplings/'+key).remove();
         continue;
