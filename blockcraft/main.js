@@ -46,6 +46,9 @@ const BLOCK_NAME = {
   [SAPLING]:'Sapling',
 };
 const HOTBAR = [GRASS, DIRT, STONE, SAND, WOOD, LEAVES, PLANKS, WATER, CRAFTING_TABLE, BRICKS, WINDOW, DOOR];
+// A few hotbar items are structures, not plain materials — give them a distinct glyph on top of
+// their swatch so they read at a glance instead of just being "another colored square."
+const HOTBAR_ICON = { [CRAFTING_TABLE]: '🛠️', [WINDOW]: '🪟', [DOOR]: '🚪' };
 // Blocks with an open/closed state: right-clicking one toggles it to the other id in this map.
 const TOGGLE_MAP = { [WINDOW]:WINDOW_OPEN, [WINDOW_OPEN]:WINDOW, [DOOR]:DOOR_OPEN, [DOOR_OPEN]:DOOR };
 // Breaking the open form of a toggleable block gives you back its closed (placeable) form.
@@ -2240,6 +2243,12 @@ function updateHotbarUI(){
     sw.className = 'swatch';
     sw.style.background = swatchColor(b);
     slot.appendChild(sw);
+    if(HOTBAR_ICON[b]){
+      const icon = document.createElement('div');
+      icon.className = 'icon';
+      icon.textContent = HOTBAR_ICON[b];
+      slot.appendChild(icon);
+    }
     const key = document.createElement('div');
     key.className='key'; key.textContent = i<10 ? (i+1)%10 : ''; // slots past 10 are scroll-only
     slot.appendChild(key);
