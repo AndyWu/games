@@ -15,10 +15,10 @@ Then visit `http://localhost:8000`.
 ## Deploy to GitHub Pages
 
 1. Create a new GitHub repository (public).
-2. Push this folder's contents (`index.html`, `main.js`, `firebase-config.js`) to the repo's default branch:
+2. Push this folder's contents (`index.html`, `main.js`, `firebase-config.js`, `assets/`) to the repo's default branch:
    ```bash
    git init
-   git add index.html main.js firebase-config.js README.md
+   git add index.html main.js firebase-config.js assets README.md
    git commit -m "Add Blockcraft voxel game"
    git branch -M main
    git remote add origin https://github.com/<your-username>/<your-repo>.git
@@ -74,7 +74,7 @@ The T-Rex and the pack of 3 velociraptors are true predators: they roam the map 
 
 Animal *placement* is deterministic (same seed for everyone), but their movement/AI runs independently on each client — so you and another player may see the same herd in slightly different spots or mid-wander differently, even though a kill is always shared. Animals only ever spawn standing on actual ground — never floating in a tree's trunk or canopy — and each species has its own procedurally-drawn hide texture (cow patches, giraffe spots, sheep wool, etc.), same technique as the block textures.
 
-Falling more than 3 blocks also hurts — you take damage roughly proportional to how far you fell beyond that. Taking any damage (from an animal, another player, or a fall) flashes a red vignette around the edge of the screen, and every action has a small synthesized sound effect (no audio files — everything's generated on the fly with the Web Audio API, same "no external assets" approach as the graphics). Lions also let out a roar the moment they turn hostile — whether that's from you attacking one or just wandering too close.
+Falling more than 3 blocks also hurts — you take damage roughly proportional to how far you fell beyond that. Taking any damage (from an animal, another player, or a fall) flashes a red vignette around the edge of the screen, and every action has a small sound effect synthesized on the fly with the Web Audio API. Lions let out a roar the moment they turn hostile — whether that's from you attacking one or just wandering too close — and it's an actual public-domain lion recording (trimmed to ~2 seconds), not a synthesized sound; see [`assets/README.md`](assets/README.md) for the source and license. Everything else audio-wise, along with all the textures, is generated procedurally with no external files.
 
 ## Multiplayer
 

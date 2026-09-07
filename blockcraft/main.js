@@ -1167,23 +1167,27 @@ function ensureAudio(){
   if(audioCtx.state==='suspended') audioCtx.resume();
   return audioCtx;
 }
-function playTone(freq, duration, type, volume, freqEnd){
+function playTone(freq, duration, type, volume, freqEnd, attack){
   const ctx = ensureAudio();
   if(!ctx) return;
+  const now = ctx.currentTime;
+  const a = attack!=null ? attack : 0.008; // tiny attack ramp avoids a harsh click at note-on
   const osc = ctx.createOscillator();
   const gain = ctx.createGain();
   osc.type = type || 'sine';
-  osc.frequency.setValueAtTime(freq, ctx.currentTime);
-  if(freqEnd) osc.frequency.exponentialRampToValueAtTime(Math.max(freqEnd,1), ctx.currentTime+duration);
-  gain.gain.setValueAtTime(volume||0.2, ctx.currentTime);
-  gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime+duration);
+  osc.frequency.setValueAtTime(freq, now);
+  if(freqEnd) osc.frequency.exponentialRampToValueAtTime(Math.max(freqEnd,1), now+duration);
+  gain.gain.setValueAtTime(0.0001, now);
+  gain.gain.exponentialRampToValueAtTime(volume||0.2, now+a);
+  gain.gain.exponentialRampToValueAtTime(0.001, now+duration);
   osc.connect(gain).connect(ctx.destination);
-  osc.start();
-  osc.stop(ctx.currentTime+duration);
+  osc.start(now);
+  osc.stop(now+duration);
 }
-function playNoise(duration, volume, filterFreq){
+function playNoise(duration, volume, filterFreq, attack){
   const ctx = ensureAudio();
   if(!ctx) return;
+  const now = ctx.currentTime;
   const bufferSize = Math.max(1, Math.floor(ctx.sampleRate*duration));
   const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
   const data = buffer.getChannelData(0);
@@ -1194,11 +1198,43 @@ function playNoise(duration, volume, filterFreq){
   filter.type = 'lowpass';
   filter.frequency.value = filterFreq || 1500;
   const gain = ctx.createGain();
-  gain.gain.value = volume || 0.3;
+  const a = attack!=null ? attack : 0.004;
+  gain.gain.setValueAtTime(0.0001, now);
+  gain.gain.linearRampToValueAtTime(volume||0.3, now+a);
   src.connect(filter).connect(gain).connect(ctx.destination);
-  src.start();
+  src.start(now);
+}
+// Real recording (public domain, Wikimedia Commons) for the lion roar — loaded once up front;
+// playRoar() falls back to the synthesized growl below if the file can't be fetched/decoded.
+let lionRoarBuffer = null, lionRoarLoadFailed = false;
+function loadLionRoar(){
+  fetch('assets/lion-roar.ogg')
+    .then(r => { if(!r.ok) throw new Error('http '+r.status); return r.arrayBuffer(); })
+    .then(buf => {
+      const ctx = ensureAudio();
+      if(!ctx) throw new Error('no audio context');
+      return new Promise((resolve,reject) => ctx.decodeAudioData(buf, resolve, reject));
+    })
+    .then(decoded => { lionRoarBuffer = decoded; })
+    .catch(() => { lionRoarLoadFailed = true; });
+}
+function playRealRoar(){
+  const ctx = ensureAudio();
+  if(!ctx || !lionRoarBuffer) return false;
+  const now = ctx.currentTime;
+  const clipDuration = Math.min(2.2, lionRoarBuffer.duration);
+  const src = ctx.createBufferSource();
+  src.buffer = lionRoarBuffer;
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0.8, now);
+  gain.gain.setValueAtTime(0.8, now + Math.max(0, clipDuration-0.35));
+  gain.gain.linearRampToValueAtTime(0.0001, now + clipDuration);
+  src.connect(gain).connect(ctx.destination);
+  src.start(now, 0, clipDuration);
+  return true;
 }
 function playRoar(){
+  if(playRealRoar()) return;
   const ctx = ensureAudio();
   if(!ctx) return;
   const now = ctx.currentTime;
@@ -1253,18 +1289,23 @@ function playRoar(){
   noiseSrc.start(now);
 }
 const SFX = {
-  breakBlock(){ playNoise(0.15, 0.35, 1200); },
-  placeBlock(){ playNoise(0.1, 0.25, 2200); },
+  breakBlock(){ playNoise(0.15, 0.35, 1200); playTone(90, 0.12, 'sine', 0.15, 50); },
+  placeBlock(){ playNoise(0.09, 0.22, 2400); playTone(180, 0.08, 'triangle', 0.1, 260); },
   swing(){ playTone(220, 0.08, 'triangle', 0.08, 180); },
-  hitAnimal(){ playTone(320, 0.1, 'square', 0.15, 150); },
-  animalDeath(){ playTone(220, 0.35, 'sawtooth', 0.18, 40); },
-  hurt(){ playTone(150, 0.25, 'sawtooth', 0.22, 80); },
+  hitAnimal(){ playNoise(0.05, 0.16, 2600); playTone(320, 0.1, 'square', 0.15, 150); },
+  animalDeath(){ playTone(220, 0.4, 'sawtooth', 0.18, 40); playNoise(0.3, 0.12, 500); },
+  hurt(){ playTone(150, 0.25, 'sawtooth', 0.22, 80); playNoise(0.15, 0.1, 900); },
   jump(){ playTone(500, 0.1, 'sine', 0.1, 700); },
-  land(){ playNoise(0.08, 0.18, 700); },
-  craft(){ playTone(660, 0.09, 'sine', 0.14, 880); setTimeout(()=>playTone(880, 0.14, 'sine', 0.14, 1100), 80); },
-  death(){ playTone(300, 0.6, 'sawtooth', 0.2, 50); },
+  land(){ playNoise(0.1, 0.2, 700); playTone(100, 0.1, 'sine', 0.12, 55); },
+  craft(){
+    playTone(660, 0.1, 'sine', 0.13, 880);
+    setTimeout(()=>playTone(880, 0.12, 'sine', 0.13, 1100), 70);
+    setTimeout(()=>playTone(1100, 0.18, 'sine', 0.11, 1320), 140);
+  },
+  death(){ playTone(300, 0.6, 'sawtooth', 0.2, 50); playNoise(0.5, 0.14, 400); },
   roar(){ playRoar(); },
 };
+loadLionRoar();
 
 // ---------- Combat ----------
 let myHP = PLAYER_MAX_HP;
