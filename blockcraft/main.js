@@ -39,6 +39,30 @@ const BLOCK_NAME = {
 const HOTBAR = [GRASS, DIRT, STONE, SAND, WOOD, LEAVES, PLANKS, WATER, CRAFTING_TABLE, BRICKS];
 const COLLECTIBLE = new Set([GRASS, DIRT, STONE, SAND, WOOD, LEAVES, PLANKS, CRAFTING_TABLE, BRICKS]);
 
+// ---------- Health / combat ----------
+const HP_PER_HEART = 2;
+const PLAYER_MAX_HP = 10 * HP_PER_HEART; // 10 hearts
+const PLAYER_ATTACK_DMG = 2;
+const ATTACK_RANGE = 4;
+const ATTACK_ANGLE_COS = Math.cos(30 * Math.PI/180);
+const AGGRO_RADIUS = 6;
+const DEAGGRO_RADIUS = 11;
+const RETALIATE_MS = 8000;
+
+// HP is scaled against the 20-HP (10-heart) human baseline to roughly track real-world size/toughness:
+// sheep and dogs are small and fragile; cows are human-sized; giraffes are big but not armored;
+// lions match a human in raw toughness (they're dangerous because of their attack, not their HP);
+// elephants are the toughest land animal, at double human HP.
+const ANIMAL_TYPES = ['cow','sheep','dog','giraffe','lion','elephant'];
+const ANIMAL_STATS = {
+  sheep:    { maxHp: 3*HP_PER_HEART,  dmg:0, retaliate:false, aggressive:false, speed:1.0, chaseSpeed:1.8 },
+  dog:      { maxHp: 4*HP_PER_HEART,  dmg:1, retaliate:true,  aggressive:false, speed:1.4, chaseSpeed:3.4 },
+  cow:      { maxHp: 5*HP_PER_HEART,  dmg:0, retaliate:false, aggressive:false, speed:0.9, chaseSpeed:1.6 },
+  giraffe:  { maxHp: 8*HP_PER_HEART,  dmg:3, retaliate:true,  aggressive:false, speed:1.1, chaseSpeed:2.6 },
+  lion:     { maxHp: 10*HP_PER_HEART, dmg:4, retaliate:true,  aggressive:true,  speed:1.2, chaseSpeed:3.8 },
+  elephant: { maxHp: 20*HP_PER_HEART, dmg:6, retaliate:true,  aggressive:true,  speed:0.8, chaseSpeed:2.4 },
+};
+
 // ---------- Crafting ----------
 const RECIPES = [
   { name:'Planks',         out:{id:PLANKS, qty:4},         in:[{id:WOOD, qty:1}] },
@@ -609,6 +633,320 @@ function colorForId(id){
   return new THREE.Color(`hsl(${h%360},60%,55%)`).getHex();
 }
 
+// ---------- Animal models (blocky quadrupeds) ----------
+function animalBox(w,h,d,color){
+  return new THREE.Mesh(new THREE.BoxGeometry(w,h,d), new THREE.MeshLambertMaterial({ color }));
+}
+function makeQuadruped(opts){
+  const g = new THREE.Group();
+  const legH = opts.bodyY - opts.bodyH/2;
+  const body = animalBox(opts.bodyW, opts.bodyH, opts.bodyD, opts.bodyColor);
+  body.position.set(0, opts.bodyY, 0);
+  g.add(body);
+
+  const lx = opts.bodyW/2 - opts.legW*0.8;
+  const lz = opts.bodyD/2 - opts.legW*0.8;
+  const legColor = opts.legColor || opts.bodyColor;
+  const legPositions = [[-lx,-lz],[lx,-lz],[-lx,lz],[lx,lz]]; // FL, FR, BL, BR (forward = -Z)
+  const legs = legPositions.map(([px,pz])=>{
+    const leg = animalBox(opts.legW, legH, opts.legW, legColor);
+    leg.geometry.translate(0,-legH/2,0);
+    leg.position.set(px, legH, pz);
+    g.add(leg);
+    return leg;
+  });
+
+  const head = animalBox(opts.headW, opts.headH, opts.headD, opts.headColor || opts.bodyColor);
+  head.position.set(0, opts.headY, opts.headZ);
+  g.add(head);
+
+  if(opts.extras) opts.extras(g, { body, head, legs });
+
+  g.userData.legs = legs;
+  return g;
+}
+const ANIMAL_BUILDERS = {
+  cow(){
+    return makeQuadruped({
+      bodyW:1.0, bodyH:0.65, bodyD:0.5, bodyY:0.75, bodyColor:0xe8e4d8,
+      legW:0.14, legColor:0xe8e4d8,
+      headW:0.32, headH:0.32, headD:0.3, headColor:0xe8e4d8, headY:0.85, headZ:-0.5,
+      extras(g){
+        const p1=animalBox(0.32,0.16,0.52,0x2a2a2a); p1.position.set(-0.2,0.98,0); g.add(p1);
+        const p2=animalBox(0.28,0.16,0.3,0x2a2a2a); p2.position.set(0.22,0.65,-0.05); g.add(p2);
+        const snout=animalBox(0.2,0.14,0.12,0xd9a0a0); snout.position.set(0,0.78,-0.67); g.add(snout);
+        const earL=animalBox(0.12,0.05,0.05,0xe8e4d8); earL.position.set(-0.2,0.95,-0.46); g.add(earL);
+        const earR=animalBox(0.12,0.05,0.05,0xe8e4d8); earR.position.set(0.2,0.95,-0.46); g.add(earR);
+      },
+    });
+  },
+  sheep(){
+    return makeQuadruped({
+      bodyW:0.7, bodyH:0.55, bodyD:0.45, bodyY:0.5, bodyColor:0xebe6d6,
+      legW:0.1, legColor:0x3a3a3a,
+      headW:0.24, headH:0.22, headD:0.22, headColor:0x3a3a3a, headY:0.55, headZ:-0.38,
+      extras(g){
+        const earL=animalBox(0.1,0.05,0.05,0x3a3a3a); earL.position.set(-0.14,0.58,-0.32); g.add(earL);
+        const earR=animalBox(0.1,0.05,0.05,0x3a3a3a); earR.position.set(0.14,0.58,-0.32); g.add(earR);
+      },
+    });
+  },
+  dog(){
+    return makeQuadruped({
+      bodyW:0.5, bodyH:0.3, bodyD:0.26, bodyY:0.4, bodyColor:0x8a5a34,
+      legW:0.08, legColor:0x8a5a34,
+      headW:0.22, headH:0.2, headD:0.22, headColor:0x8a5a34, headY:0.48, headZ:-0.3,
+      extras(g){
+        const earL=animalBox(0.06,0.14,0.1,0x5a3a20); earL.position.set(-0.12,0.56,-0.32); g.add(earL);
+        const earR=animalBox(0.06,0.14,0.1,0x5a3a20); earR.position.set(0.12,0.56,-0.32); g.add(earR);
+        const tail=animalBox(0.06,0.06,0.26,0x8a5a34); tail.position.set(0,0.48,0.26); tail.rotation.x=0.5; g.add(tail);
+      },
+    });
+  },
+  giraffe(){
+    return makeQuadruped({
+      bodyW:0.6, bodyH:0.55, bodyD:0.4, bodyY:1.5, bodyColor:0xd8b26a,
+      legW:0.13, legColor:0xd8b26a,
+      headW:0.22, headH:0.28, headD:0.26, headColor:0xd8b26a, headY:2.55, headZ:-0.4,
+      extras(g){
+        const neck=animalBox(0.22,1.15,0.22,0xd8b26a);
+        neck.position.set(0,1.98,-0.32); neck.rotation.x=-0.18; g.add(neck);
+        const spot=(x,y,z)=>{ const s=animalBox(0.12,0.12,0.1,0xa5763a); s.position.set(x,y,z); g.add(s); };
+        spot(-0.2,1.6,0.08); spot(0.18,1.35,-0.08); spot(-0.1,1.25,0.15); spot(0.1,1.7,0.1);
+        const hornL=animalBox(0.05,0.14,0.05,0x8a6a3a); hornL.position.set(-0.08,2.78,-0.42); g.add(hornL);
+        const hornR=animalBox(0.05,0.14,0.05,0x8a6a3a); hornR.position.set(0.08,2.78,-0.42); g.add(hornR);
+      },
+    });
+  },
+  lion(){
+    return makeQuadruped({
+      bodyW:0.85, bodyH:0.55, bodyD:0.5, bodyY:0.65, bodyColor:0xc99a4e,
+      legW:0.14, legColor:0xc99a4e,
+      headW:0.32, headH:0.3, headD:0.28, headColor:0xc99a4e, headY:0.8, headZ:-0.5,
+      extras(g){
+        const mane=animalBox(0.46,0.46,0.4,0x8a5a28); mane.position.set(0,0.8,-0.44); g.add(mane);
+        const head2=animalBox(0.32,0.3,0.28,0xc99a4e); head2.position.set(0,0.8,-0.58); g.add(head2);
+        const tail=animalBox(0.06,0.06,0.4,0xc99a4e); tail.position.set(0,0.65,0.5); tail.rotation.x=0.3; g.add(tail);
+        const tuft=animalBox(0.1,0.1,0.1,0x5a3a1a); tuft.position.set(0,0.5,0.68); g.add(tuft);
+      },
+    });
+  },
+  elephant(){
+    return makeQuadruped({
+      bodyW:1.3, bodyH:0.9, bodyD:0.7, bodyY:1.0, bodyColor:0x9a9a9a,
+      legW:0.24, legColor:0x9a9a9a,
+      headW:0.5, headH:0.5, headD:0.4, headColor:0x9a9a9a, headY:1.15, headZ:-0.65,
+      extras(g){
+        const earL=animalBox(0.06,0.4,0.4,0x8a8a8a); earL.position.set(-0.28,1.2,-0.55); g.add(earL);
+        const earR=animalBox(0.06,0.4,0.4,0x8a8a8a); earR.position.set(0.28,1.2,-0.55); g.add(earR);
+        const trunk=animalBox(0.14,0.55,0.14,0x9a9a9a);
+        trunk.geometry.translate(0,-0.275,0); trunk.position.set(0,1.3,-0.85); trunk.rotation.x=0.2; g.add(trunk);
+        const tuskL=animalBox(0.05,0.05,0.22,0xf0ead6); tuskL.position.set(-0.12,0.95,-0.9); g.add(tuskL);
+        const tuskR=animalBox(0.05,0.05,0.22,0xf0ead6); tuskR.position.set(0.12,0.95,-0.9); g.add(tuskR);
+      },
+    });
+  },
+};
+function createAnimalMesh(type){ return ANIMAL_BUILDERS[type](); }
+function animateQuadrupedWalk(group, state, dt, moving, speedMul){
+  state.amp += ((moving?1:0) - state.amp) * Math.min(1, dt*8);
+  state.phase += dt * 6 * (speedMul||1);
+  const swing = Math.sin(state.phase) * 0.5 * state.amp;
+  const [fl,fr,bl,br] = group.userData.legs;
+  fl.rotation.x = swing;  br.rotation.x = swing;
+  fr.rotation.x = -swing; bl.rotation.x = -swing;
+}
+
+// ---------- Animal AI ----------
+const animals = [];
+function groundHeightAt(x,z){
+  const bx=Math.floor(x), bz=Math.floor(z);
+  for(let y=WORLD_HEIGHT-1;y>=0;y--){
+    if(blockSolid(bx,y,bz)) return y+1;
+  }
+  return 1;
+}
+function spawnAnimals(){
+  const counts = { cow:4, sheep:5, dog:3, giraffe:3, lion:2, elephant:2 };
+  let idx=0;
+  for(const type of ANIMAL_TYPES){
+    for(let i=0;i<counts[type];i++){
+      let x,z,h,tries=0;
+      do{
+        const hx = hash2(idx*7.13+1.7, idx*3.91+5.2+tries*0.37);
+        const hz = hash2(idx*11.3+2.9+tries*0.53, idx*4.77+8.1);
+        x = 4 + Math.floor(hx*(WORLD_SIZE-8));
+        z = 4 + Math.floor(hz*(WORLD_SIZE-8));
+        h = heightAt(x,z);
+        tries++;
+      } while((h<=SEA_LEVEL || getBlock(x,h,z)!==GRASS) && tries<30);
+      const stats = ANIMAL_STATS[type];
+      const mesh = createAnimalMesh(type);
+      const gy = groundHeightAt(x+0.5, z+0.5);
+      mesh.position.set(x+0.5, gy, z+0.5);
+      scene.add(mesh);
+      animals.push({
+        id: type+'_'+idx, type, mesh,
+        hp: stats.maxHp, maxHp: stats.maxHp,
+        x:x+0.5, y:gy, z:z+0.5, yaw: hash2(idx*2.1,idx*5.7)*Math.PI*2,
+        wanderTimer: hash2(idx*3.3,idx*1.1)*2, target:null,
+        aggroUntil:0, attackCooldown:0, walk:{phase:0,amp:0},
+      });
+      idx++;
+    }
+  }
+}
+function updateAnimal(a, dt){
+  const stats = ANIMAL_STATS[a.type];
+  a.attackCooldown = Math.max(0, a.attackCooldown - dt);
+
+  const dxp = player.pos.x - a.x, dzp = player.pos.z - a.z;
+  const distToPlayer = Math.hypot(dxp,dzp);
+  const now = performance.now();
+
+  if(stats.aggressive && distToPlayer < AGGRO_RADIUS) a.aggroUntil = Math.max(a.aggroUntil, now + 1500);
+  const isAggro = now < a.aggroUntil && distToPlayer < DEAGGRO_RADIUS;
+
+  let moving = false;
+  if(isAggro){
+    if(distToPlayer > 0.05){
+      const nx = dxp/distToPlayer, nz = dzp/distToPlayer;
+      a.yaw = Math.atan2(-nx, -nz);
+      if(distToPlayer > ATTACK_RANGE*0.4){
+        a.x += nx*stats.chaseSpeed*dt;
+        a.z += nz*stats.chaseSpeed*dt;
+        moving = true;
+      } else if(a.attackCooldown<=0){
+        damagePlayer(stats.dmg, a.type);
+        a.attackCooldown = 1.1;
+      }
+    }
+  } else {
+    a.wanderTimer -= dt;
+    if(a.wanderTimer<=0){
+      a.wanderTimer = 2+Math.random()*3;
+      a.target = Math.random()<0.6
+        ? { x:a.x+(Math.random()*2-1)*3, z:a.z+(Math.random()*2-1)*3 }
+        : null;
+    }
+    if(a.target){
+      const tdx=a.target.x-a.x, tdz=a.target.z-a.z, td=Math.hypot(tdx,tdz);
+      if(td>0.15){
+        const nx=tdx/td, nz=tdz/td;
+        a.yaw = Math.atan2(-nx,-nz);
+        a.x += nx*stats.speed*dt*0.5;
+        a.z += nz*stats.speed*dt*0.5;
+        moving = true;
+      } else a.target = null;
+    }
+  }
+
+  a.x = Math.max(1, Math.min(WORLD_SIZE-1, a.x));
+  a.z = Math.max(1, Math.min(WORLD_SIZE-1, a.z));
+  a.y = groundHeightAt(a.x, a.z);
+
+  a.mesh.position.set(a.x, a.y, a.z);
+  a.mesh.rotation.y = a.yaw;
+  animateQuadrupedWalk(a.mesh, a.walk, dt, moving, isAggro?1.6:1);
+}
+function updateAnimals(dt){ animals.forEach(a=>updateAnimal(a,dt)); }
+function killAnimal(a){
+  scene.remove(a.mesh);
+  const i = animals.indexOf(a);
+  if(i>=0) animals.splice(i,1);
+}
+function damageAnimal(a, dmg){
+  a.hp = Math.max(0, a.hp - dmg);
+  const stats = ANIMAL_STATS[a.type];
+  if(stats.retaliate) a.aggroUntil = performance.now() + RETALIATE_MS;
+  if(fbReady) db.ref('world/mobs/'+a.id+'/hp').set(a.hp);
+  if(a.hp<=0) killAnimal(a);
+}
+function applyRemoteMobHp(id, hp){
+  const a = animals.find(x=>x.id===id);
+  if(!a || hp==null || hp===a.hp) return;
+  a.hp = hp;
+  if(a.hp<=0) killAnimal(a);
+}
+
+// ---------- Combat ----------
+let myHP = PLAYER_MAX_HP;
+function heartSVG(kind, i){
+  const red='#d9463c', gray='#4a4a4a', dark='#2a2a2a';
+  const path = 'M12 21s-7.5-4.6-10-9.3C0.3 8.5 2 5 5.5 5c2 0 3.3 1.1 4 2.2C10.2 6.1 11.5 5 13.5 5 17 5 18.7 8.5 17 11.7 15.5 16.4 12 21 12 21z';
+  if(kind==='half'){
+    const cid = 'heartClip'+i;
+    return `<svg viewBox="0 0 24 24" width="20" height="20"><defs><clipPath id="${cid}"><rect x="0" y="0" width="12" height="24"/></clipPath></defs><path d="${path}" fill="${gray}" stroke="${dark}" stroke-width="1"/><path d="${path}" fill="${red}" clip-path="url(#${cid})"/></svg>`;
+  }
+  const fill = kind==='full' ? red : 'none';
+  const stroke = kind==='full' ? dark : gray;
+  return `<svg viewBox="0 0 24 24" width="20" height="20"><path d="${path}" fill="${fill}" stroke="${stroke}" stroke-width="${kind==='full'?1:1.5}"/></svg>`;
+}
+function updateHeartsUI(){
+  const el = document.getElementById('hearts');
+  if(!el) return;
+  el.innerHTML = '';
+  const totalHearts = PLAYER_MAX_HP / HP_PER_HEART;
+  for(let i=0;i<totalHearts;i++){
+    const remaining = Math.max(0, Math.min(HP_PER_HEART, myHP - i*HP_PER_HEART));
+    const kind = remaining>=HP_PER_HEART ? 'full' : (remaining>0 ? 'half' : 'empty');
+    el.insertAdjacentHTML('beforeend', heartSVG(kind,i));
+  }
+}
+function damagePlayer(dmg, sourceType){
+  myHP = Math.max(0, myHP - dmg);
+  updateHeartsUI();
+  if(fbReady) db.ref('players/'+myId+'/hp').set(myHP);
+  if(myHP<=0) die();
+}
+function die(){
+  const msg = document.getElementById('deathMessage');
+  if(msg){ msg.hidden = false; setTimeout(()=>{ msg.hidden = true; }, 1500); }
+  spawnPlayer();
+  myHP = PLAYER_MAX_HP;
+  updateHeartsUI();
+  if(fbReady) db.ref('players/'+myId+'/hp').set(myHP);
+}
+function findAttackTarget(){
+  const dir = getLookDir(player.yaw, player.pitch);
+  const origin = camera.position;
+  let best = null, bestDist = Infinity;
+  animals.forEach(a=>{
+    const dx=a.x-origin.x, dy=(a.y+0.4)-origin.y, dz=a.z-origin.z;
+    const dist = Math.hypot(dx,dy,dz);
+    if(dist>ATTACK_RANGE || dist>=bestDist) return;
+    const dot = (dx/dist)*dir.x + (dy/dist)*dir.y + (dz/dist)*dir.z;
+    if(dot>ATTACK_ANGLE_COS){ best = {type:'animal', ref:a}; bestDist = dist; }
+  });
+  remotePlayers.forEach((e,id)=>{
+    const dx=e.mesh.position.x-origin.x, dy=(e.mesh.position.y+1.0)-origin.y, dz=e.mesh.position.z-origin.z;
+    const dist = Math.hypot(dx,dy,dz);
+    if(dist>ATTACK_RANGE || dist>=bestDist) return;
+    const dot = (dx/dist)*dir.x + (dy/dist)*dir.y + (dz/dist)*dir.z;
+    if(dot>ATTACK_ANGLE_COS){ best = {type:'player', id, ref:e}; bestDist = dist; }
+  });
+  return best;
+}
+function damageRemotePlayer(id, entry, dmg){
+  const cur = entry.hp!=null ? entry.hp : PLAYER_MAX_HP;
+  const newHp = Math.max(0, cur - dmg);
+  entry.hp = newHp;
+  if(fbReady) db.ref('players/'+id+'/hp').set(newHp);
+}
+let lastPlayerAttack = 0;
+function tryAttack(){
+  const target = findAttackTarget();
+  if(!target) return false;
+  const now = performance.now();
+  if(now - lastPlayerAttack >= 350){
+    lastPlayerAttack = now;
+    triggerSwing();
+    if(target.type==='animal') damageAnimal(target.ref, PLAYER_ATTACK_DMG);
+    else damageRemotePlayer(target.id, target.ref, PLAYER_ATTACK_DMG);
+  }
+  return true;
+}
+
 let thirdPerson = false;
 let characterMesh;
 const myWalkState = { phase:0, amp:0 };
@@ -631,13 +969,17 @@ function addRemotePlayer(id, data){
   mesh.position.set(data.x||0, data.y||0, data.z||0);
   mesh.rotation.y = data.yaw||0;
   scene.add(mesh);
-  remotePlayers.set(id, { mesh, target:{x:data.x||0,y:data.y||0,z:data.z||0,yaw:data.yaw||0}, walk:{phase:0,amp:0} });
+  remotePlayers.set(id, {
+    mesh, target:{x:data.x||0,y:data.y||0,z:data.z||0,yaw:data.yaw||0}, walk:{phase:0,amp:0},
+    hp: data.hp!=null ? data.hp : PLAYER_MAX_HP,
+  });
   document.getElementById('playerCount').textContent = remotePlayers.size+1;
 }
 function updateRemotePlayer(id, data){
   const e = remotePlayers.get(id);
   if(!e) return addRemotePlayer(id, data);
   e.target.x = data.x||0; e.target.y = data.y||0; e.target.z = data.z||0; e.target.yaw = data.yaw||0;
+  if(data.hp!=null) e.hp = data.hp;
 }
 function removeRemotePlayer(id){
   const e = remotePlayers.get(id);
@@ -673,7 +1015,8 @@ function broadcastPosition(now){
   if(!fbReady) return;
   if(now - lastBroadcast < 100) return;
   lastBroadcast = now;
-  db.ref('players/'+myId).set({
+  // update(), not set(): a set() would clobber the hp field, which other clients write to directly on attack
+  db.ref('players/'+myId).update({
     x: Math.round(player.pos.x*100)/100,
     y: Math.round(player.pos.y*100)/100,
     z: Math.round(player.pos.z*100)/100,
@@ -695,6 +1038,17 @@ function initMultiplayer(){
 
     const myRef = db.ref('players/'+myId);
     myRef.onDisconnect().remove();
+    myRef.set({
+      x: Math.round(player.pos.x*100)/100, y: Math.round(player.pos.y*100)/100, z: Math.round(player.pos.z*100)/100,
+      yaw: Math.round(player.yaw*100)/100, hp: myHP, t: firebase.database.ServerValue.TIMESTAMP,
+    });
+    db.ref('players/'+myId+'/hp').on('value', snap=>{
+      const v = snap.val();
+      if(v==null || v===myHP) return;
+      myHP = v;
+      updateHeartsUI();
+      if(myHP<=0) die();
+    });
 
     db.ref('world/edits').on('child_added', snap=>{
       const [x,y,z] = snap.key.split(',').map(Number);
@@ -703,6 +1057,13 @@ function initMultiplayer(){
     db.ref('world/edits').on('child_changed', snap=>{
       const [x,y,z] = snap.key.split(',').map(Number);
       applyWorldEdit(x,y,z,snap.val(),true);
+    });
+
+    db.ref('world/mobs').on('child_added', snap=>{
+      applyRemoteMobHp(snap.key, snap.val() && snap.val().hp);
+    });
+    db.ref('world/mobs').on('child_changed', snap=>{
+      applyRemoteMobHp(snap.key, snap.val() && snap.val().hp);
     });
 
     db.ref('players').on('child_added', snap=>{
@@ -912,7 +1273,7 @@ document.addEventListener('mousemove', e=>{
 document.addEventListener('contextmenu', e=> e.preventDefault());
 document.addEventListener('mousedown', e=>{
   if(!locked) return;
-  if(e.button===0) breakBlock();
+  if(e.button===0){ if(!tryAttack()) breakBlock(); }
   if(e.button===2){
     const hit = raycastBlock();
     if(hit && getBlock(hit.x,hit.y,hit.z)===CRAFTING_TABLE) openCrafting();
@@ -1030,8 +1391,10 @@ function init(){
   loadInventory();
   rebuildAllChunks();
   spawnPlayer();
+  spawnAnimals();
   updateHotbarUI();
   updateHeldItemColor();
+  updateHeartsUI();
   initMultiplayer();
 
   window.addEventListener('resize', ()=>{
@@ -1059,6 +1422,7 @@ function animate(now){
   updateCharacterAnim(dt, moving, sprinting);
   updateHandView(dt, moving, sprinting);
   updateRemotePlayers(dt);
+  updateAnimals(dt);
   broadcastPosition(now);
 
   if(thirdPerson){

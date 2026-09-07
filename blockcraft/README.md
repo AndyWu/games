@@ -36,7 +36,7 @@ Then visit `http://localhost:8000`.
 - `Space` — jump
 - `Shift` — sprint
 - Mouse — look (click the page first to lock the pointer)
-- Left click — break block
+- Left click — break block, or attack whatever animal/player you're looking at within range
 - Right click — place block (or open the crafting menu if you're looking at a Crafting Table)
 - `1`–`0` or mouse wheel — select block from hotbar
 - `E` — open/close crafting when standing near a Crafting Table
@@ -52,6 +52,23 @@ Blocks you break go into your inventory (shown as counts on the hotbar), and pla
 - 4 Stone → 4 Bricks
 
 The Craft button lights up once you have enough materials. Your inventory (like your world edits) is saved to `localStorage`, so it persists across reloads.
+
+## Health & combat
+
+Every human player has 10 hearts (20 HP), shown at the top of the screen. The world has six kinds of animals, each with HP scaled against that 10-heart baseline to roughly track their real-world size and toughness:
+
+| Animal   | HP (hearts) | Attacks back? | Attacks on sight? |
+|----------|-------------|----------------|--------------------|
+| Sheep    | 3           | No             | No                 |
+| Dog      | 4           | Yes            | No                 |
+| Cow      | 5           | No             | No                 |
+| Giraffe  | 8           | Yes            | No                 |
+| Lion     | 10          | Yes            | Yes (within ~6 blocks) |
+| Elephant | 20          | Yes            | Yes (within ~6 blocks) |
+
+Cows and sheep are always harmless — you can hit them but they never fight back. Dogs and giraffes only turn hostile once you attack them. Lions and elephants will charge and attack on their own if you wander too close, whether or not you've touched them. Left-click anything in range to attack it (a fixed 1-heart hit, on a short cooldown); killing an animal or a player's HP dropping to 0 is synced live through Firebase, so a kill is permanent for everyone in the shared world, not just you. Dying resets you to full health at the spawn point.
+
+Animal *placement* is deterministic (same seed for everyone), but their movement/AI runs independently on each client — so you and another player may see the same herd in slightly different spots or mid-wander differently, even though a kill is always shared.
 
 ## Multiplayer
 
