@@ -2618,16 +2618,32 @@ const FIREWORK_COLORS = [0xff4d4d, 0xffb347, 0xfff066, 0x7cfc8a, 0x66d9ff, 0xb38
 const FIREWORK_PARTICLES = 48;
 const SPEED_OF_SOUND = 343; // world units (~meters) per second
 const fireworks = [];
-function launchFirework(){
-  const x = player.pos.x, z = player.pos.z;
-  const startY = player.pos.y + player.eye;
+// Shared by both the local right-click and a remote player's launch synced through Firebase (see
+// initMultiplayer's 'world/fireworks' listener), so everyone in the shared world sees and hears the
+// same rocket, not just whoever launched it. The launch whistle gets the same speed-of-sound delay
+// as the burst boom — for your own launch that's imperceptible (you're right next to it), but a
+// firework someone else set off across the map now visibly outraces its own sound for you too.
+function spawnFireworkEffect(x,z,startY,targetY){
   const mesh = new THREE.Mesh(new THREE.SphereGeometry(0.1,6,6), new THREE.MeshBasicMaterial({color:0xfff2b0}));
   mesh.position.set(x, startY, z);
   scene.add(mesh);
   const trailLight = new THREE.PointLight(0xfff2b0, 1.4, 6, 2);
   mesh.add(trailLight);
-  fireworks.push({ mesh, x, z, startY, targetY: startY + 9 + Math.random()*5, t:0, riseTime: 0.9, burst:null });
-  SFX.fireworkLaunch();
+  fireworks.push({ mesh, x, z, startY, targetY, t:0, riseTime: 0.9, burst:null });
+  const dist = Math.hypot(x-player.pos.x, startY-(player.pos.y+player.eye), z-player.pos.z);
+  setTimeout(()=>SFX.fireworkLaunch(), (dist/SPEED_OF_SOUND)*1000);
+}
+function launchFirework(){
+  const x = player.pos.x, z = player.pos.z;
+  const startY = player.pos.y + player.eye;
+  const targetY = startY + 9 + Math.random()*5;
+  spawnFireworkEffect(x,z,startY,targetY);
+  if(fbReady){
+    const ref = db.ref('world/fireworks').push({
+      x, y:startY, z, targetY, by:myId, t: firebase.database.ServerValue.TIMESTAMP,
+    });
+    setTimeout(()=> ref.remove(), 3000); // ephemeral event, not persistent world state
+  }
 }
 function createFireworkBurst(x,y,z){
   const n = FIREWORK_PARTICLES;
@@ -2805,6 +2821,12 @@ function initMultiplayer(){
     db.ref('world/fires').on('child_removed', snap=>{
       fires.delete(snap.key);
       removeFireFx(snap.key);
+    });
+
+    db.ref('world/fireworks').on('child_added', snap=>{
+      const val = snap.val();
+      if(!val || val.by===myId) return; // we already played our own launch locally
+      spawnFireworkEffect(val.x, val.z, val.y, val.targetY);
     });
 
     db.ref('players').on('child_added', snap=>{

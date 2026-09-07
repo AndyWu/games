@@ -85,7 +85,9 @@ You don't have to place one to benefit from it, either — simply having a Torch
 
 Firework is unlimited — it has no recipe and is never used up, so once you put it in a hotbar slot it's always there. Select it and right-click to launch: a rocket climbs straight up from wherever you're standing and blooms into an evenly-spaced, colorful shower of sparks a moment later, like a flower opening outward, complete with its own soft flash of light.
 
-The launch has a synthesized rising whistle, but the burst uses a real public-domain fireworks recording (see `assets/README.md`) layered with a few bright synthesized crackle-pops for sparkle. The boom is also delayed to match how far away the burst actually is — light reaches you instantly but sound doesn't, so a firework going off right above you is basically instant while a distant one visibly booms a beat after you see it, exactly like real fireworks.
+The launch has a synthesized rising whistle, but the burst uses a real public-domain fireworks recording (see `assets/README.md`) layered with a few bright synthesized crackle-pops for sparkle. Both sounds are delayed to match how far away the firework actually is — light reaches you instantly but sound doesn't, so one going off right above you is basically instant while a distant one visibly outraces its own sound before you hear it, exactly like real fireworks.
+
+Fireworks are synced through Firebase like any other world event, so anyone launched by any connected player is seen (and heard, at the correct delay for wherever you happen to be standing) by everyone in the shared world — not just the person who set it off.
 
 ## Windows & doors
 
