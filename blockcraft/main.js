@@ -1682,6 +1682,11 @@ const SFX = {
       setTimeout(()=>playNoise(0.05+Math.random()*0.05, 0.09, 2800+Math.random()*3400, 0.002), 50+i*65+Math.random()*40);
     }
   },
+  // Two overlapping soft descending tones for a gentle, cartoonish "woo-ooh" — spooky but harmless.
+  ghostBoo(){
+    playTone(300, 0.5, 'sine', 0.12, 180, 0.05);
+    setTimeout(()=>playTone(240, 0.4, 'sine', 0.08, 140, 0.05), 150);
+  },
 };
 lionRoarClip.load();
 fireworkBurstClip.load();
@@ -2516,6 +2521,122 @@ function updateWorms(dt){
     w.mesh.position.set(w.x, w.y + Math.sin(t*1.5+w.phase)*0.04, w.z);
     w.mesh.rotation.y = Math.sin(t*0.3+w.phase)*0.6;
   }
+}
+
+// ---------- Ghost: a single harmless Casper who floats around at night ----------
+// Solid-block collision simply never applies to it — its position is set directly every frame with
+// no blockSolid/collidesBox check anywhere, so it drifts straight through walls, trees, hills,
+// anything. It hovers a fixed 1 block above whatever ground is directly below it (recomputed each
+// frame via groundHeightAt, the same helper animals use to find footing), fades in with the same
+// night-only visibility fireflies already use, and is otherwise a lazy wanderer recycled near the
+// player — except every so often (GHOST_SURPRISE_*) it breaks off to drift in close behind the
+// player for a few seconds with a soft "boo", then wanders off again. Purely decorative: it never
+// deals damage or reacts to being hit, and — like fireflies/worms — it's a local-only flourish, not
+// synced across clients.
+const GHOST_WANDER_RADIUS = 22;
+const GHOST_SURPRISE_MIN_S = 30, GHOST_SURPRISE_MAX_S = 90;
+const GHOST_SURPRISE_DURATION_S = 3;
+const GHOST_APPROACH_SPEED = 4; // units/s while closing in during a "surprise"
+let ghostTexture = null, ghost = null;
+// Built per-pixel (a boundary test per row/column) rather than with canvas path/arc calls, so the
+// scalloped tail is an unambiguous sine-wave edge instead of relying on overlapping erased circles.
+function buildGhostTexture(){
+  const W=48, H=64;
+  const canvas = document.createElement('canvas');
+  canvas.width=W; canvas.height=H;
+  const ctx = canvas.getContext('2d');
+  const cx0=W/2, domeCy=H*0.30, domeR=W*0.42;
+  const leftX=W*0.08, rightX=W*0.92;
+  const straightBottom=H*0.74, tailBottom=H*0.92, waves=4;
+  ctx.fillStyle = 'rgba(255,255,255,0.92)';
+  for(let y=0;y<H;y++){
+    for(let x=0;x<W;x++){
+      let inside;
+      if(y<domeCy){
+        const dx=x-cx0, dy=y-domeCy;
+        inside = (dx*dx+dy*dy) <= domeR*domeR;
+      } else if(y<straightBottom){
+        inside = x>=leftX && x<=rightX;
+      } else {
+        const xf = (x-leftX)/(rightX-leftX);
+        const wave = Math.sin(xf*waves*Math.PI*2)*0.5+0.5;
+        const localBottom = straightBottom + (tailBottom-straightBottom)*wave;
+        inside = x>=leftX && x<=rightX && y<=localBottom;
+      }
+      if(inside) ctx.fillRect(x,y,1,1);
+    }
+  }
+  ctx.fillStyle = 'rgba(25,25,40,0.85)';
+  ctx.beginPath(); ctx.ellipse(W*0.37,domeCy,W*0.065,H*0.075,0,0,Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(W*0.63,domeCy,W*0.065,H*0.075,0,0,Math.PI*2); ctx.fill();
+  return new THREE.CanvasTexture(canvas);
+}
+function ensureGhost(){
+  if(ghost) return;
+  if(!ghostTexture) ghostTexture = buildGhostTexture();
+  const mat = new THREE.SpriteMaterial({ map:ghostTexture, transparent:true, opacity:0, depthWrite:false });
+  const sprite = new THREE.Sprite(mat);
+  sprite.scale.set(1.1, 1.5, 1);
+  scene.add(sprite);
+  const light = new THREE.PointLight(0xcfe8ff, 0, 6, 2);
+  scene.add(light);
+  ghost = {
+    sprite, light,
+    x: player.pos.x, y: player.pos.y+1, z: player.pos.z, baseY: player.pos.y+1,
+    homeX: player.pos.x, homeZ: player.pos.z,
+    freqX: 0.15+Math.random()*0.1, freqZ: 0.13+Math.random()*0.1, freqY: 0.25+Math.random()*0.15,
+    ampXZ: 3+Math.random()*2, ampY: 0.4, phase: Math.random()*Math.PI*2,
+    state: 'wander',
+    surpriseTimer: GHOST_SURPRISE_MIN_S + Math.random()*(GHOST_SURPRISE_MAX_S-GHOST_SURPRISE_MIN_S),
+    surpriseElapsed: 0, targetX: 0, targetZ: 0,
+  };
+}
+function updateGhost(dt){
+  ensureGhost();
+  const g = ghost;
+  const night = fireflyNightFactor();
+  const t = performance.now()/1000;
+
+  if(g.state==='wander'){
+    const dx = g.homeX-player.pos.x, dz = g.homeZ-player.pos.z;
+    if(dx*dx+dz*dz > GHOST_WANDER_RADIUS*GHOST_WANDER_RADIUS){
+      const ang = Math.random()*Math.PI*2, r = 8+Math.random()*10;
+      g.homeX = player.pos.x + Math.cos(ang)*r;
+      g.homeZ = player.pos.z + Math.sin(ang)*r;
+    }
+    g.x = g.homeX + Math.sin(t*g.freqX+g.phase)*g.ampXZ;
+    g.z = g.homeZ + Math.cos(t*g.freqZ+g.phase*1.3)*g.ampXZ;
+    g.surpriseTimer -= dt;
+    if(g.surpriseTimer<=0 && night>0.5 && locked){
+      g.state = 'surprise';
+      g.surpriseElapsed = 0;
+      const ang = player.yaw + Math.PI + (Math.random()<0.5?0.5:-0.5); // roughly behind, left or right
+      const dist = 2.2+Math.random();
+      g.targetX = player.pos.x + Math.sin(ang)*dist;
+      g.targetZ = player.pos.z + Math.cos(ang)*dist;
+      SFX.ghostBoo();
+    }
+  } else { // surprise
+    g.surpriseElapsed += dt;
+    const step = GHOST_APPROACH_SPEED*dt;
+    const dx = g.targetX-g.x, dz = g.targetZ-g.z, d = Math.hypot(dx,dz);
+    if(d>step) { g.x += dx/d*step; g.z += dz/d*step; }
+    else { g.x = g.targetX; g.z = g.targetZ; }
+    if(g.surpriseElapsed >= GHOST_SURPRISE_DURATION_S){
+      g.state = 'wander';
+      g.homeX = g.x; g.homeZ = g.z;
+      g.surpriseTimer = GHOST_SURPRISE_MIN_S + Math.random()*(GHOST_SURPRISE_MAX_S-GHOST_SURPRISE_MIN_S);
+    }
+  }
+
+  const groundY = groundHeightAt(g.x, g.z);
+  const targetBaseY = groundY + 1;
+  g.baseY += (targetBaseY-g.baseY) * Math.min(1, dt*2);
+  g.y = g.baseY + Math.sin(t*g.freqY+g.phase*0.6)*g.ampY;
+  g.sprite.position.set(g.x, g.y, g.z);
+  g.light.position.copy(g.sprite.position);
+  g.sprite.material.opacity = night*0.85;
+  g.light.intensity = night*0.6;
 }
 
 // ---------- Saplings: little trees that randomly appear on grass and slowly grow into full trees ----------
@@ -3724,6 +3845,7 @@ function animate(now){
   updateFireworks(dt);
   updateFireflies(dt);
   updateWorms(dt);
+  updateGhost(dt);
   heldTorchLight.visible = HOTBAR[selectedSlot]===TORCH;
   if(heldTorchLight.visible) heldTorchLight.intensity = 1.0 + Math.random()*0.3;
   updateDayNight();
