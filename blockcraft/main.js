@@ -2426,6 +2426,10 @@ function placeBlock(){
 // ---------- Input ----------
 const keys = {};
 let selectedSlot = 0;
+// Direct letter shortcuts for the hotbar, one per slot — no numbers, no scroll-wheel cycling.
+// Picked to avoid every letter already bound to something else (WASD move, E craft, I inventory,
+// V third-person), and clustered near WASD so they're reachable without moving your hand.
+const HOTBAR_KEYS = ['KeyQ','KeyR','KeyF','KeyT','KeyG','KeyC','KeyX','KeyZ','KeyB'];
 window.addEventListener('keydown', e=>{
   keys[e.code]=true;
   if(e.code==='Escape'){
@@ -2444,22 +2448,13 @@ window.addEventListener('keydown', e=>{
     return;
   }
   if(e.code==='KeyV' && locked){ thirdPerson = !thirdPerson; return; }
-  if(e.code.startsWith('Digit')){
-    let n = parseInt(e.code.slice(5),10);
-    if(n===0) n = 10;
-    if(n>=1 && n<=HOTBAR.length){
-      selectedSlot = n-1; updateHotbarUI(); updateHeldItemColor();
-      if(itemsOpen) renderItemsGrid();
-    }
+  const slotIdx = HOTBAR_KEYS.indexOf(e.code);
+  if(slotIdx>=0 && slotIdx<HOTBAR.length){
+    selectedSlot = slotIdx; updateHotbarUI(); updateHeldItemColor();
+    if(itemsOpen) renderItemsGrid();
   }
 });
 window.addEventListener('keyup', e=>{ keys[e.code]=false; });
-window.addEventListener('wheel', e=>{
-  if(!locked) return;
-  selectedSlot = (selectedSlot + (e.deltaY>0?1:-1) + HOTBAR.length) % HOTBAR.length;
-  updateHotbarUI();
-  updateHeldItemColor();
-});
 
 const isTouchDevice = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
 function doAttackOrBreak(){ if(!tryAttack()) breakBlock(); }
@@ -2622,7 +2617,7 @@ function updateHotbarUI(){
       slot.appendChild(icon);
     }
     const key = document.createElement('div');
-    key.className='key'; key.textContent = i+1;
+    key.className='key'; key.textContent = HOTBAR_KEYS[i] ? HOTBAR_KEYS[i].slice(3) : '';
     slot.appendChild(key);
     const count_el = document.createElement('div');
     count_el.className='count'; count_el.textContent = count;
@@ -2750,7 +2745,7 @@ function makeItemTile(id){
   return tile;
 }
 function renderItemsGrid(){
-  document.getElementById('itemsSlotNum').textContent = selectedSlot+1;
+  document.getElementById('itemsSlotNum').textContent = HOTBAR_KEYS[selectedSlot] ? HOTBAR_KEYS[selectedSlot].slice(3) : selectedSlot+1;
   const grid = document.getElementById('itemsGrid');
   grid.innerHTML = '';
   const held = ALL_ITEMS.filter(id => invCount(id)>0);
