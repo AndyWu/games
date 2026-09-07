@@ -70,7 +70,7 @@ Cows and sheep are always harmless — you can hit them but they never fight bac
 
 Animal *placement* is deterministic (same seed for everyone), but their movement/AI runs independently on each client — so you and another player may see the same herd in slightly different spots or mid-wander differently, even though a kill is always shared. Animals only ever spawn standing on actual ground — never floating in a tree's trunk or canopy — and each species has its own procedurally-drawn hide texture (cow patches, giraffe spots, sheep wool, etc.), same technique as the block textures.
 
-Falling more than 3 blocks also hurts — you take damage roughly proportional to how far you fell beyond that. Taking any damage (from an animal, another player, or a fall) flashes a red vignette around the edge of the screen, and every action has a small synthesized sound effect (no audio files — everything's generated on the fly with the Web Audio API, same "no external assets" approach as the graphics).
+Falling more than 3 blocks also hurts — you take damage roughly proportional to how far you fell beyond that. Taking any damage (from an animal, another player, or a fall) flashes a red vignette around the edge of the screen, and every action has a small synthesized sound effect (no audio files — everything's generated on the fly with the Web Audio API, same "no external assets" approach as the graphics). Lions also let out a roar the moment they turn hostile — whether that's from you attacking one or just wandering too close.
 
 ## Multiplayer
 

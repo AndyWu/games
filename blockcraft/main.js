@@ -891,7 +891,7 @@ function spawnAnimals(){
         hp: stats.maxHp, maxHp: stats.maxHp,
         x:x+0.5, y:gy, z:z+0.5, yaw: hash2(idx*2.1,idx*5.7)*Math.PI*2,
         wanderTimer: hash2(idx*3.3,idx*1.1)*2, target:null,
-        aggroUntil:0, attackCooldown:0, walk:{phase:0,amp:0},
+        aggroUntil:0, attackCooldown:0, walk:{phase:0,amp:0}, wasAggro:false,
       });
       idx++;
     }
@@ -907,6 +907,8 @@ function updateAnimal(a, dt){
 
   if(stats.aggressive && distToPlayer < AGGRO_RADIUS) a.aggroUntil = Math.max(a.aggroUntil, now + 1500);
   const isAggro = now < a.aggroUntil && distToPlayer < DEAGGRO_RADIUS;
+  if(isAggro && !a.wasAggro && a.type==='lion') SFX.roar();
+  a.wasAggro = isAggro;
 
   let moving = false;
   if(isAggro){
@@ -1012,6 +1014,60 @@ function playNoise(duration, volume, filterFreq){
   src.connect(filter).connect(gain).connect(ctx.destination);
   src.start();
 }
+function playRoar(){
+  const ctx = ensureAudio();
+  if(!ctx) return;
+  const now = ctx.currentTime;
+  const duration = 1.2;
+
+  // low growling tone with a slow pitch wobble (vibrato) and a rise-then-fall contour
+  const osc = ctx.createOscillator();
+  osc.type = 'sawtooth';
+  osc.frequency.setValueAtTime(85, now);
+  osc.frequency.linearRampToValueAtTime(150, now+0.18);
+  osc.frequency.linearRampToValueAtTime(60, now+duration);
+
+  const lfo = ctx.createOscillator();
+  lfo.frequency.value = 7.5;
+  const lfoGain = ctx.createGain();
+  lfoGain.gain.value = 14;
+  lfo.connect(lfoGain).connect(osc.frequency);
+
+  const lowpass = ctx.createBiquadFilter();
+  lowpass.type = 'lowpass';
+  lowpass.frequency.setValueAtTime(350, now);
+  lowpass.frequency.linearRampToValueAtTime(1000, now+0.18);
+  lowpass.frequency.linearRampToValueAtTime(250, now+duration);
+
+  const oscGain = ctx.createGain();
+  oscGain.gain.setValueAtTime(0.0001, now);
+  oscGain.gain.exponentialRampToValueAtTime(0.32, now+0.14);
+  oscGain.gain.exponentialRampToValueAtTime(0.18, now+0.55);
+  oscGain.gain.exponentialRampToValueAtTime(0.0001, now+duration);
+
+  osc.connect(lowpass).connect(oscGain).connect(ctx.destination);
+
+  // filtered noise layer for a breathy, throaty growl texture
+  const bufferSize = Math.floor(ctx.sampleRate*duration);
+  const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+  const data = buffer.getChannelData(0);
+  for(let i=0;i<bufferSize;i++) data[i] = Math.random()*2-1;
+  const noiseSrc = ctx.createBufferSource();
+  noiseSrc.buffer = buffer;
+  const noiseFilter = ctx.createBiquadFilter();
+  noiseFilter.type = 'bandpass';
+  noiseFilter.frequency.value = 500;
+  noiseFilter.Q.value = 0.7;
+  const noiseGain = ctx.createGain();
+  noiseGain.gain.setValueAtTime(0.0001, now);
+  noiseGain.gain.exponentialRampToValueAtTime(0.16, now+0.18);
+  noiseGain.gain.exponentialRampToValueAtTime(0.0001, now+duration);
+  noiseSrc.connect(noiseFilter).connect(noiseGain).connect(ctx.destination);
+
+  osc.start(now); osc.stop(now+duration);
+  lfo.start(now); lfo.stop(now+duration);
+  noiseSrc.start(now);
+}
 const SFX = {
   breakBlock(){ playNoise(0.15, 0.35, 1200); },
   placeBlock(){ playNoise(0.1, 0.25, 2200); },
@@ -1023,6 +1079,7 @@ const SFX = {
   land(){ playNoise(0.08, 0.18, 700); },
   craft(){ playTone(660, 0.09, 'sine', 0.14, 880); setTimeout(()=>playTone(880, 0.14, 'sine', 0.14, 1100), 80); },
   death(){ playTone(300, 0.6, 'sawtooth', 0.2, 50); },
+  roar(){ playRoar(); },
 };
 
 // ---------- Combat ----------
