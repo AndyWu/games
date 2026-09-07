@@ -2014,7 +2014,29 @@ function lerpColorHex(a,b,t){
   return (Math.round(ar+(br-ar)*t)<<16) | (Math.round(ag+(bg-ag)*t)<<8) | Math.round(ab+(bb-ab)*t);
 }
 function currentDayTime(){ return (Date.now()/1000 % DAY_LENGTH_S) / DAY_LENGTH_S; }
-let lastWorldTimeLabel = null;
+
+// ---------- Calendar: Year/Month/Day, anchored to a specific real-world instant ----------
+// A parallel, purely cosmetic calendar for the HUD date — it doesn't feed into season/temperature/
+// weather at all (those keep their own independent wall-clock cycle). 2026-09-06 08:00 PDT is fixed
+// as the start of Year 0, Jan 1; every real hour after that is one month (matching the existing
+// season length of 3 hours = 3 months), and each month is a nominal 30 "days" so the date visibly
+// ticks forward (one every 2 real minutes) instead of sitting on "Day 1" for the whole month.
+const CALENDAR_EPOCH_MS = Date.UTC(2026, 8, 6, 15, 0, 0); // 2026-09-06 08:00 PDT (UTC-7) == 15:00 UTC
+const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const MONTH_LENGTH_S = 3600;                // 1 real hour per month
+const CALENDAR_DAY_S = MONTH_LENGTH_S / 30;  // a nominal 30-day month
+function currentCalendarDate(){
+  const elapsedS = (Date.now() - CALENDAR_EPOCH_MS) / 1000;
+  const totalMonths = Math.floor(elapsedS / MONTH_LENGTH_S);
+  const year = Math.floor(totalMonths / 12);
+  let monthIdx = totalMonths % 12;
+  if(monthIdx < 0) monthIdx += 12;
+  const intoMonthS = elapsedS - totalMonths*MONTH_LENGTH_S;
+  const day = 1 + Math.floor(intoMonthS / CALENDAR_DAY_S);
+  return { year, month: MONTH_NAMES[monthIdx], day };
+}
+
+let lastWorldTimeLabel = null, lastDateLabel = null;
 function updateDayNight(){
   const dayTime = currentDayTime();
   const totalMinutes = Math.floor(dayTime*24*60) % (24*60);
@@ -2023,6 +2045,13 @@ function updateDayNight(){
     lastWorldTimeLabel = timeText;
     const el = document.getElementById('worldTimeLabel');
     if(el) el.textContent = timeText;
+  }
+  const { year, month, day } = currentCalendarDate();
+  const dateText = `${month} ${day}, Y${year}`;
+  if(dateText !== lastDateLabel){
+    lastDateLabel = dateText;
+    const el = document.getElementById('dateLabel');
+    if(el) el.textContent = dateText;
   }
   let k0 = DAY_KEYFRAMES[0], k1 = DAY_KEYFRAMES[DAY_KEYFRAMES.length-1];
   for(let i=0;i<DAY_KEYFRAMES.length-1;i++){
