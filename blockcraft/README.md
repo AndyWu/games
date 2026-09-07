@@ -89,6 +89,10 @@ The launch has a synthesized rising whistle, but the burst uses a real public-do
 
 Fireworks are synced through Firebase like any other world event, so anyone launched by any connected player is seen (and heard, at the correct delay for wherever you happen to be standing) by everyone in the shared world — not just the person who set it off.
 
+## Ladders
+
+Craft Ladders from Wood (1 Wood → 4 Ladders). Right-click a wall to place one — a single Ladder item fills in a run of up to 5 rungs going straight up from wherever you clicked (stopping early if something's in the way), so one item is usually enough to scale a small cliff or the inside of a tower. Ladders aren't solid — walk into one and holding `W` (or `Space`) climbs you straight up along it, `S` climbs back down, and letting go just holds you in place instead of falling. Climbing down never counts as a fall, so you can descend as far as you like without taking fall damage.
+
 ## Windows & doors
 
 Windows and doors are placeable blocks with an open and a closed state. They're placed closed; right-click a placed one to toggle it — closed blocks movement and (for windows) is a translucent glass texture, open is passable and renders more faded so it's visually obvious you can walk through it. Each has its own creak/slide sound effect for opening vs. closing. Breaking either state always gives you back the closed (placeable) item, never the open one. Toggling is a normal world edit, so it's saved and synced through Firebase like any other block change.

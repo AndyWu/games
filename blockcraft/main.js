@@ -18,7 +18,7 @@ const AIR=0, GRASS=1, DIRT=2, STONE=3, SAND=4, WOOD=5, LEAVES=6, PLANKS=7, WATER
 const CRAFTING_TABLE=10, BRICKS=11, STICK=12;
 const WINDOW=13, WINDOW_OPEN=14, DOOR=15, DOOR_OPEN=16;
 const SAPLING=17;
-const FLINT=18, FIRE=19, TORCH=20, FIREWORK=21;
+const FLINT=18, FIRE=19, TORCH=20, FIREWORK=21, LADDER=22;
 
 const BLOCK_COLOR = {
   [GRASS]:  0x5b8a3a,
@@ -42,6 +42,7 @@ const BLOCK_COLOR = {
   [FIRE]: 0xff8a2b,
   [TORCH]: 0xd98a3d,
   [FIREWORK]: 0xd94dcf,
+  [LADDER]: 0x8a6a3a,
 };
 const BLOCK_NAME = {
   [GRASS]:'Grass', [DIRT]:'Dirt', [STONE]:'Stone', [SAND]:'Sand', [WOOD]:'Wood',
@@ -49,11 +50,12 @@ const BLOCK_NAME = {
   [CRAFTING_TABLE]:'Crafting Table', [BRICKS]:'Bricks', [STICK]:'Stick',
   [WINDOW]:'Window', [WINDOW_OPEN]:'Window (open)', [DOOR]:'Door', [DOOR_OPEN]:'Door (open)',
   [SAPLING]:'Sapling', [FLINT]:'Flint', [FIRE]:'Fire', [TORCH]:'Torch', [FIREWORK]:'Firework',
+  [LADDER]:'Ladder',
 };
 // Every item the player can ever select. The hotbar only shows HOTBAR_SIZE of these at a time —
 // the rest are reachable through the Items panel (the palette button, or the "I" key), which lets
 // the player swap any hotbar slot for anything in this list.
-const ALL_ITEMS = [GRASS, DIRT, STONE, SAND, WOOD, LEAVES, PLANKS, WATER, CRAFTING_TABLE, BRICKS, STICK, WINDOW, DOOR, FLINT, TORCH, FIREWORK];
+const ALL_ITEMS = [GRASS, DIRT, STONE, SAND, WOOD, LEAVES, PLANKS, WATER, CRAFTING_TABLE, BRICKS, STICK, WINDOW, DOOR, FLINT, TORCH, FIREWORK, LADDER];
 const HOTBAR_SIZE = 9;
 const DEFAULT_HOTBAR = [GRASS, DIRT, STONE, SAND, WOOD, PLANKS, CRAFTING_TABLE, DOOR, FLINT];
 const HOTBAR = DEFAULT_HOTBAR.slice();
@@ -70,12 +72,12 @@ function loadHotbar(){
 }
 // A few items are structures/tools, not plain materials — give them a distinct glyph on top of
 // their swatch so they read at a glance instead of just being "another colored square."
-const HOTBAR_ICON = { [CRAFTING_TABLE]: '🛠️', [WINDOW]: '🪟', [DOOR]: '🚪', [FLINT]: '🔥', [TORCH]: '🕯️', [FIREWORK]: '🎆' };
+const HOTBAR_ICON = { [CRAFTING_TABLE]: '🛠️', [WINDOW]: '🪟', [DOOR]: '🚪', [FLINT]: '🔥', [TORCH]: '🕯️', [FIREWORK]: '🎆', [LADDER]: '🪜' };
 // Blocks with an open/closed state: right-clicking one toggles it to the other id in this map.
 const TOGGLE_MAP = { [WINDOW]:WINDOW_OPEN, [WINDOW_OPEN]:WINDOW, [DOOR]:DOOR_OPEN, [DOOR_OPEN]:DOOR };
 // Breaking the open form of a toggleable block gives you back its closed (placeable) form.
 const COLLECT_AS = { [WINDOW_OPEN]:WINDOW, [DOOR_OPEN]:DOOR };
-const COLLECTIBLE = new Set([GRASS, DIRT, STONE, SAND, WOOD, LEAVES, PLANKS, CRAFTING_TABLE, BRICKS, WINDOW, WINDOW_OPEN, DOOR, DOOR_OPEN, TORCH]);
+const COLLECTIBLE = new Set([GRASS, DIRT, STONE, SAND, WOOD, LEAVES, PLANKS, CRAFTING_TABLE, BRICKS, WINDOW, WINDOW_OPEN, DOOR, DOOR_OPEN, TORCH, LADDER]);
 
 // ---------- Health / combat ----------
 const HP_PER_HEART = 2;
@@ -125,6 +127,7 @@ const RECIPES = [
   { name:'Door',           out:{id:DOOR, qty:1},            in:[{id:PLANKS, qty:3}] },
   { name:'Flint',          out:{id:FLINT, qty:1},           in:[{id:STONE, qty:2}] },
   { name:'Torch',          out:{id:TORCH, qty:2},           in:[{id:STICK, qty:1}, {id:FLINT, qty:1}] },
+  { name:'Ladder',         out:{id:LADDER, qty:4},          in:[{id:WOOD, qty:1}] },
 ];
 const inventory = {};
 // Fireworks are unlimited — no recipe, never consumed, always available regardless of what's saved.
@@ -160,7 +163,7 @@ const TILE = 32, ATLAS_COLS = 4, ATLAS_ROWS = 6;
 const T_GRASS_TOP=0, T_GRASS_SIDE=1, T_DIRT=2, T_STONE=3, T_SAND=4, T_LOG_SIDE=5, T_LOG_TOP=6,
       T_LEAVES=7, T_PLANKS=8, T_BEDROCK=9, T_CRAFT_TOP=10, T_CRAFT_SIDE=11, T_BRICKS=12, T_WATER=13,
       T_WINDOW=14, T_WINDOW_OPEN=15, T_DOOR=16, T_DOOR_OPEN=17, T_SAPLING=18, T_FLINT=19, T_FIRE=20,
-      T_TORCH=21;
+      T_TORCH=21, T_LADDER=22;
 
 function hexRGB(hex){ return [(hex>>16)&255, (hex>>8)&255, hex&255]; }
 function rgbStr(r,g,b){ return `rgb(${r|0},${g|0},${b|0})`; }
@@ -497,6 +500,20 @@ function drawTorch(ctx,x0,y0){
   ctx.fillStyle = '#ffd75e';
   ctx.fillRect(x0+TILE/2-1,y0+TILE*0.04,2,TILE*0.1);
 }
+function drawLadder(ctx,x0,y0){
+  // near-black base + the glass bucket's transparency (same trick as fire/torch) reads as an open
+  // wooden ladder you can see through the gaps of, rather than a solid cube.
+  fillTile(ctx,x0,y0,0x0a0a0a);
+  ctx.fillStyle = shadeStr(0x8a6a3a,1,10);
+  ctx.fillRect(x0+TILE*0.12, y0, TILE*0.14, TILE);
+  ctx.fillRect(x0+TILE*0.74, y0, TILE*0.14, TILE);
+  const rungs = 4;
+  for(let i=0;i<rungs;i++){
+    const ry = y0 + TILE*0.1 + i*(TILE*0.8/(rungs-1)) - TILE*0.045;
+    ctx.fillStyle = shadeStr(0x9a7a48,1,10);
+    ctx.fillRect(x0+TILE*0.12, ry, TILE*0.76, TILE*0.09);
+  }
+}
 function buildAtlas(){
   const canvas = document.createElement('canvas');
   canvas.width = TILE*ATLAS_COLS;
@@ -504,7 +521,8 @@ function buildAtlas(){
   const ctx = canvas.getContext('2d');
   const draw = [drawGrassTop, drawGrassSide, drawDirt, drawStone, drawSand, drawLogSide, drawLogTop,
                 drawLeaves, drawPlanks, drawBedrock, drawCraftTop, drawCraftSide, drawBricks, drawWater,
-                drawWindow, drawWindowOpen, drawDoor, drawDoorOpen, drawSapling, drawFlint, drawFire, drawTorch];
+                drawWindow, drawWindowOpen, drawDoor, drawDoorOpen, drawSapling, drawFlint, drawFire, drawTorch,
+                drawLadder];
   draw.forEach((fn, i)=> fn(ctx, (i%ATLAS_COLS)*TILE, Math.floor(i/ATLAS_COLS)*TILE));
   const tex = new THREE.CanvasTexture(canvas);
   tex.magFilter = THREE.NearestFilter;
@@ -541,6 +559,7 @@ const BLOCK_TILES = {
   [FLINT]: {top:T_FLINT, side:T_FLINT, bottom:T_FLINT},
   [FIRE]: {top:T_FIRE, side:T_FIRE, bottom:T_FIRE},
   [TORCH]: {top:T_TORCH, side:T_TORCH, bottom:T_TORCH},
+  [LADDER]: {top:T_LADDER, side:T_LADDER, bottom:T_LADDER},
 };
 // per-face-direction UV winding (0/1 flags select u0/u1 and vBottom/vTop), aligned to FACES order below
 const UV_PATTERNS = [
@@ -768,7 +787,7 @@ const glassMaterial = new THREE.MeshLambertMaterial({ vertexColors: true, side: 
 // Any block that isn't fully opaque. A face between two blocks of the SAME transparent type is
 // skipped (no point rendering the seam between two adjacent water or window blocks); a face against
 // a *different* transparent type, or against AIR, still draws.
-const TRANSPARENT_BLOCKS = new Set([WATER, WINDOW, WINDOW_OPEN, DOOR_OPEN, SAPLING, FIRE, TORCH]);
+const TRANSPARENT_BLOCKS = new Set([WATER, WINDOW, WINDOW_OPEN, DOOR_OPEN, SAPLING, FIRE, TORCH, LADDER]);
 function bucketFor(b){ return b===WATER ? 'water' : (TRANSPARENT_BLOCKS.has(b) ? 'glass' : 'solid'); }
 
 // Blocks with a clear vertical path up to the sky get full outdoor light; anything with a solid
@@ -962,7 +981,7 @@ function updateMinimap(){
 }
 
 // ---------- Player ----------
-const GRAVITY = -28, JUMP_SPEED = 9, WALK_SPEED = 5.2, SPRINT_SPEED = 8.4;
+const GRAVITY = -28, JUMP_SPEED = 9, WALK_SPEED = 5.2, SPRINT_SPEED = 8.4, LADDER_CLIMB_SPEED = 4;
 const player = {
   pos: new THREE.Vector3(0,0,0),
   vel: new THREE.Vector3(0,0,0),
@@ -3171,7 +3190,7 @@ function updateHandView(dt, moving, sprinting){
 
 function blockSolid(bx,by,bz){
   const b = getBlock(bx,by,bz);
-  return b!==AIR && b!==WATER && b!==WINDOW_OPEN && b!==DOOR_OPEN && b!==SAPLING && b!==FIRE && b!==TORCH;
+  return b!==AIR && b!==WATER && b!==WINDOW_OPEN && b!==DOOR_OPEN && b!==SAPLING && b!==FIRE && b!==TORCH && b!==LADDER;
 }
 function collidesBox(px,py,pz){
   const w = player.width/2;
@@ -3253,6 +3272,17 @@ function getLookDir(yaw,pitch){
   );
 }
 
+function isTouchingLadder(){
+  const w = player.width/2;
+  const minX = Math.floor(player.pos.x-w), maxX = Math.floor(player.pos.x+w);
+  const minY = Math.floor(player.pos.y),   maxY = Math.floor(player.pos.y+player.height);
+  const minZ = Math.floor(player.pos.z-w), maxZ = Math.floor(player.pos.z+w);
+  for(let x=minX;x<=maxX;x++)
+    for(let y=minY;y<=maxY;y++)
+      for(let z=minZ;z<=maxZ;z++)
+        if(getBlock(x,y,z)===LADDER) return true;
+  return false;
+}
 function updatePlayer(dt){
   const fx = -Math.sin(player.yaw), fz = -Math.cos(player.yaw);
   const rx =  Math.cos(player.yaw), rz = -Math.sin(player.yaw);
@@ -3268,13 +3298,23 @@ function updatePlayer(dt){
   const speed = (keys['ShiftLeft']||keys['ShiftRight']) ? SPRINT_SPEED : WALK_SPEED;
 
   const wasOnGround = player.onGround;
+  const onLadder = isTouchingLadder();
 
-  player.vel.y += GRAVITY*dt;
-  if(player.vel.y < -50) player.vel.y = -50;
-  if(keys['Space'] && player.onGround){
-    player.vel.y = JUMP_SPEED;
-    player.onGround = false;
-    SFX.jump();
+  if(onLadder){
+    // Climbing overrides gravity entirely — hold W/Space to go up, S to go down, let go to hang in
+    // place, same feel as swimming would be if this game had it.
+    let climbY = 0;
+    if(keys['KeyW'] || keys['Space']) climbY = LADDER_CLIMB_SPEED;
+    else if(keys['KeyS']) climbY = -LADDER_CLIMB_SPEED;
+    player.vel.y = climbY;
+  } else {
+    player.vel.y += GRAVITY*dt;
+    if(player.vel.y < -50) player.vel.y = -50;
+    if(keys['Space'] && player.onGround){
+      player.vel.y = JUMP_SPEED;
+      player.onGround = false;
+      SFX.jump();
+    }
   }
 
   const dx = mx*speed*dt, dz = mz*speed*dt, dy = player.vel.y*dt;
@@ -3298,7 +3338,7 @@ function updatePlayer(dt){
     }
     SFX.land();
   }
-  if(player.onGround) player.fallFrom = player.pos.y;
+  if(player.onGround || onLadder) player.fallFrom = player.pos.y;
 
   player.pos.x = Math.max(1, Math.min(WORLD_SIZE-1, player.pos.x));
   player.pos.z = Math.max(1, Math.min(WORLD_SIZE-1, player.pos.z));
@@ -3410,11 +3450,33 @@ function placeDoor(hit){
   triggerSwing();
   SFX.placeBlock();
 }
+const LADDER_PLACE_HEIGHT = 5;
+// One Ladder item places a run of up to 5 rungs going straight up from the targeted cell (stopping
+// early if it runs into something, rather than requiring the full run to be clear like a door does)
+// — climbing any of them is handled in updatePlayer via isTouchingLadder.
+function placeLadder(hit){
+  const {x,y,z} = hit.prev;
+  if(invCount(LADDER)<=0) return;
+  const cells = [];
+  for(let dy=0; dy<LADDER_PLACE_HEIGHT; dy++){
+    const cy = y+dy;
+    if(getBlock(x,cy,z)!==AIR || playerOverlapsCell(x,cy,z)) break;
+    cells.push({x,y:cy,z});
+  }
+  if(cells.length===0) return;
+  for(const c of cells) applyWorldEdit(c.x, c.y, c.z, LADDER, false);
+  invSub(LADDER,1);
+  saveInventory();
+  updateHotbarUI();
+  triggerSwing();
+  SFX.placeBlock();
+}
 function placeBlock(){
   const hit = raycastBlock();
   if(!hit || !hit.prev) return;
   const block = HOTBAR[selectedSlot];
   if(block===DOOR){ placeDoor(hit); return; }
+  if(block===LADDER){ placeLadder(hit); return; }
   const {x,y,z} = hit.prev;
   if(getBlock(x,y,z)!==AIR) return;
   if(invCount(block)<=0) return;
