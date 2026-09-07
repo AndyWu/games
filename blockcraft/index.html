@@ -23,11 +23,21 @@
   #overlay p{max-width:520px;line-height:1.6;opacity:0.92;font-size:15px;}
   #overlay .key{background:rgba(255,255,255,0.15);padding:2px 8px;border-radius:4px;}
   #overlay .small{margin-top:18px;font-size:12px;opacity:0.65;}
-  #hud{position:fixed;top:10px;left:10px;color:#fff;font-size:12px;text-shadow:0 0 3px #000;z-index:10;line-height:1.5;background:rgba(0,0,0,0.25);padding:6px 10px;border-radius:6px;}
-  #hearts{position:fixed;top:10px;left:50%;transform:translateX(-50%);display:flex;gap:2px;z-index:10;filter:drop-shadow(0 0 2px rgba(0,0,0,0.7));}
+  #hud{position:fixed;top:10px;left:10px;color:#fff;font-size:12px;text-shadow:0 0 3px #000;z-index:10;line-height:1.5;background:rgba(0,0,0,0.25);padding:6px 10px;border-radius:6px;pointer-events:none;}
+  #hearts{position:fixed;top:10px;left:50%;transform:translateX(-50%);display:flex;gap:2px;z-index:10;filter:drop-shadow(0 0 2px rgba(0,0,0,0.7));pointer-events:none;}
   #deathMessage{position:fixed;top:35%;left:50%;transform:translate(-50%,-50%);color:#e05a4a;font-size:2em;font-weight:700;text-shadow:0 0 8px rgba(0,0,0,0.8);z-index:15;pointer-events:none;}
   #hurtOverlay{position:fixed;inset:0;z-index:14;pointer-events:none;opacity:0;background:radial-gradient(ellipse at center, rgba(180,0,0,0) 35%, rgba(180,0,0,0.55) 100%);}
-  #hint{position:fixed;bottom:80px;left:50%;transform:translateX(-50%);color:#fff;font-size:12px;text-shadow:0 0 3px #000;z-index:10;opacity:0.85;white-space:nowrap;}
+  #hint{position:fixed;bottom:80px;left:50%;transform:translateX(-50%);color:#fff;font-size:12px;text-shadow:0 0 3px #000;z-index:10;opacity:0.85;white-space:nowrap;pointer-events:none;}
+  body.touch-device #hint{display:none;}
+  #touchControls{position:fixed;inset:0;pointer-events:none;}
+  #touchLookZone{position:absolute;inset:0;z-index:9;pointer-events:auto;touch-action:none;}
+  #joystickBase{position:fixed;left:26px;bottom:26px;width:110px;height:110px;border-radius:50%;background:rgba(255,255,255,0.12);border:2px solid rgba(255,255,255,0.35);z-index:11;pointer-events:auto;touch-action:none;}
+  #joystickKnob{position:absolute;left:50%;top:50%;width:48px;height:48px;margin:-24px 0 0 -24px;border-radius:50%;background:rgba(255,255,255,0.55);border:2px solid rgba(255,255,255,0.8);}
+  .touchBtn{position:fixed;z-index:11;pointer-events:auto;touch-action:none;border-radius:50%;border:2px solid rgba(255,255,255,0.5);background:rgba(0,0,0,0.35);color:#fff;font-size:22px;display:flex;align-items:center;justify-content:center;-webkit-user-select:none;user-select:none;}
+  #btnAttack{right:20px;bottom:100px;width:74px;height:74px;}
+  #btnPlace{right:104px;bottom:100px;width:60px;height:60px;font-size:17px;}
+  #btnJump{right:20px;bottom:20px;width:60px;height:60px;font-size:13px;}
+  #btn3p{right:16px;top:10px;width:44px;height:44px;font-size:16px;z-index:11;}
   #craftHint{position:fixed;bottom:80px;left:50%;transform:translateX(-50%);color:#fff;font-size:13px;font-weight:600;text-shadow:0 0 4px #000;z-index:11;opacity:0;transition:opacity 0.15s;pointer-events:none;background:rgba(0,0,0,0.4);padding:6px 12px;border-radius:6px;}
   #craftHint.show{opacity:1;}
   #craftingModal{position:fixed;inset:0;z-index:30;background:rgba(0,0,0,0.55);display:flex;align-items:center;justify-content:center;}
@@ -60,6 +70,14 @@
 <div id="hotbar"></div>
 <div id="hint">Left click: break / attack &nbsp;·&nbsp; Right click: place (or open a table / toggle a window or door) &nbsp;·&nbsp; 1-0 + scroll: select block &nbsp;·&nbsp; E: craft &nbsp;·&nbsp; V: 3rd person &nbsp;·&nbsp; Esc: release mouse</div>
 <div id="craftHint">Right-click the table (or press E) to craft</div>
+<div id="touchControls" hidden>
+  <div id="touchLookZone"></div>
+  <div id="joystickBase"><div id="joystickKnob"></div></div>
+  <button id="btnAttack" class="touchBtn" aria-label="Break / attack">⛏</button>
+  <button id="btnPlace" class="touchBtn" aria-label="Place / interact">▦</button>
+  <button id="btnJump" class="touchBtn" aria-label="Jump">JUMP</button>
+  <button id="btn3p" class="touchBtn" aria-label="Toggle third person">3rd</button>
+</div>
 <div id="craftingModal" hidden>
   <div id="craftingPanel">
     <div id="craftingHeader">
@@ -72,14 +90,14 @@
 </div>
 <div id="overlay">
   <h1>Blockcraft</h1>
-  <p>
+  <p id="controlsText">
     A tiny Minecraft-inspired voxel sandbox that runs entirely in your browser.<br><br>
     <span class="key">WASD</span> move &nbsp; <span class="key">Space</span> jump &nbsp; <span class="key">Shift</span> sprint<br>
     <span class="key">Mouse</span> look &nbsp; <span class="key">Left click</span> break / attack &nbsp; <span class="key">Right click</span> place<br>
     <span class="key">1-0</span> select block &nbsp; <span class="key">E</span> craft at table &nbsp; <span class="key">V</span> 3rd person
   </p>
-  <p><strong>Click anywhere to play</strong></p>
-  <p class="small">Break blocks to gather materials, then place your Crafting Table and press E next to it to craft — including windows and doors, which you can right-click to open or close. Cows and sheep are harmless — dogs, giraffes, lions and elephants will fight back if you attack them, and lions and elephants will attack on sight if you get too close. Progress is saved automatically in this browser.</p>
+  <p id="tapToPlay"><strong>Click anywhere to play</strong></p>
+  <p id="playHint" class="small">Break blocks to gather materials, then place your Crafting Table and press E next to it to craft — including windows and doors, which you can right-click to open or close. Cows and sheep are harmless — dogs, giraffes, lions and elephants will fight back if you attack them, and lions and elephants will attack on sight if you get too close. Progress is saved automatically in this browser.</p>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>

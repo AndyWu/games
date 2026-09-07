@@ -1811,15 +1811,46 @@ window.addEventListener('wheel', e=>{
   updateHeldItemColor();
 });
 
+const isTouchDevice = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
+function doAttackOrBreak(){ if(!tryAttack()) breakBlock(); }
+function doInteract(){
+  const hit = raycastBlock();
+  const hitBlock = hit ? getBlock(hit.x,hit.y,hit.z) : null;
+  if(hitBlock===CRAFTING_TABLE) openCrafting();
+  else if(hitBlock in TOGGLE_MAP) toggleOpenable(hit.x, hit.y, hit.z, hitBlock);
+  else placeBlock();
+}
+
 const overlay = document.getElementById('overlay');
+const touchControls = document.getElementById('touchControls');
 let locked = false;
-overlay.addEventListener('click', ()=>{ ensureAudio(); if(!craftingOpen) document.body.requestPointerLock(); });
+if(isTouchDevice){
+  document.body.classList.add('touch-device');
+  const controlsP = document.getElementById('controlsText');
+  if(controlsP) controlsP.innerHTML = 'A tiny Minecraft-inspired voxel sandbox that runs entirely in your browser.<br><br>Left stick: move &nbsp; Drag right side: look<br>⛏ break/attack &nbsp; ▦ place/interact &nbsp; JUMP jump &nbsp; 3rd camera';
+  const tapP = document.getElementById('tapToPlay');
+  if(tapP) tapP.innerHTML = '<strong>Tap anywhere to play</strong>';
+  const hintP = document.getElementById('playHint');
+  if(hintP) hintP.textContent = 'Break blocks to gather materials, then place your Crafting Table and tap it to craft — including windows and doors, which you can tap to open or close. Cows and sheep are harmless — dogs, giraffes, lions and elephants will fight back if you attack them, and lions and elephants will attack on sight if you get too close. Progress is saved automatically in this browser.';
+}
+overlay.addEventListener('click', ()=>{
+  ensureAudio();
+  if(craftingOpen) return;
+  if(isTouchDevice){
+    locked = true;
+    overlay.hidden = true;
+    touchControls.hidden = false;
+  } else {
+    document.body.requestPointerLock();
+  }
+});
 document.addEventListener('pointerlockchange', ()=>{
+  if(isTouchDevice) return;
   locked = document.pointerLockElement === document.body;
   overlay.hidden = locked || craftingOpen;
 });
 document.addEventListener('mousemove', e=>{
-  if(!locked) return;
+  if(!locked || isTouchDevice) return;
   player.yaw -= e.movementX * 0.0022;
   player.pitch -= e.movementY * 0.0022;
   player.pitch = Math.max(-Math.PI/2+0.01, Math.min(Math.PI/2-0.01, player.pitch));
@@ -1827,15 +1858,89 @@ document.addEventListener('mousemove', e=>{
 document.addEventListener('contextmenu', e=> e.preventDefault());
 document.addEventListener('mousedown', e=>{
   if(!locked) return;
-  if(e.button===0){ if(!tryAttack()) breakBlock(); }
-  if(e.button===2){
-    const hit = raycastBlock();
-    const hitBlock = hit ? getBlock(hit.x,hit.y,hit.z) : null;
-    if(hitBlock===CRAFTING_TABLE) openCrafting();
-    else if(hitBlock in TOGGLE_MAP) toggleOpenable(hit.x, hit.y, hit.z, hitBlock);
-    else placeBlock();
-  }
+  if(e.button===0) doAttackOrBreak();
+  if(e.button===2) doInteract();
 });
+
+// ---------- Touch controls (phones/tablets: virtual joystick, drag-look, action buttons) ----------
+if(isTouchDevice){
+  const joyBase = document.getElementById('joystickBase');
+  const joyKnob = document.getElementById('joystickKnob');
+  const maxR = 38;
+  let joyTouchId = null, joyCenter = {x:0,y:0};
+  function setMoveKeys(forward, strafe, mag){
+    keys['KeyW'] = forward > 0.25;
+    keys['KeyS'] = forward < -0.25;
+    keys['KeyD'] = strafe > 0.25;
+    keys['KeyA'] = strafe < -0.25;
+    keys['ShiftLeft'] = mag > 0.85;
+  }
+  function updateJoystick(cx,cy){
+    const dx = cx-joyCenter.x, dy = cy-joyCenter.y;
+    const dist = Math.hypot(dx,dy);
+    const clamped = Math.min(dist, maxR);
+    const ang = Math.atan2(dy,dx);
+    const kx = Math.cos(ang)*clamped, ky = Math.sin(ang)*clamped;
+    joyKnob.style.transform = `translate(${kx}px, ${ky}px)`;
+    setMoveKeys(-(ky/maxR), kx/maxR, clamped/maxR);
+  }
+  function resetJoystick(){
+    joyTouchId = null;
+    joyKnob.style.transform = 'translate(0px,0px)';
+    setMoveKeys(0,0,0);
+  }
+  joyBase.addEventListener('touchstart', e=>{
+    const t = e.changedTouches[0];
+    joyTouchId = t.identifier;
+    const rect = joyBase.getBoundingClientRect();
+    joyCenter = { x: rect.left+rect.width/2, y: rect.top+rect.height/2 };
+    updateJoystick(t.clientX, t.clientY);
+    e.preventDefault();
+  }, {passive:false});
+  joyBase.addEventListener('touchmove', e=>{
+    for(const t of e.changedTouches) if(t.identifier===joyTouchId) updateJoystick(t.clientX, t.clientY);
+    e.preventDefault();
+  }, {passive:false});
+  joyBase.addEventListener('touchend', e=>{
+    for(const t of e.changedTouches) if(t.identifier===joyTouchId) resetJoystick();
+  });
+  joyBase.addEventListener('touchcancel', resetJoystick);
+
+  const lookZone = document.getElementById('touchLookZone');
+  let lookTouchId = null, lastLook = {x:0,y:0};
+  lookZone.addEventListener('touchstart', e=>{
+    if(craftingOpen) return;
+    const t = e.changedTouches[0];
+    lookTouchId = t.identifier;
+    lastLook = {x:t.clientX, y:t.clientY};
+    e.preventDefault();
+  }, {passive:false});
+  lookZone.addEventListener('touchmove', e=>{
+    for(const t of e.changedTouches){
+      if(t.identifier===lookTouchId){
+        const dx = t.clientX-lastLook.x, dy = t.clientY-lastLook.y;
+        lastLook = {x:t.clientX, y:t.clientY};
+        player.yaw -= dx*0.0045;
+        player.pitch -= dy*0.0045;
+        player.pitch = Math.max(-Math.PI/2+0.01, Math.min(Math.PI/2-0.01, player.pitch));
+      }
+    }
+    e.preventDefault();
+  }, {passive:false});
+  lookZone.addEventListener('touchend', e=>{
+    for(const t of e.changedTouches) if(t.identifier===lookTouchId) lookTouchId = null;
+  });
+
+  function bindTouchButton(id, onDown, onUp){
+    const el = document.getElementById(id);
+    el.addEventListener('touchstart', e=>{ e.preventDefault(); e.stopPropagation(); onDown(); }, {passive:false});
+    if(onUp) el.addEventListener('touchend', e=>{ e.preventDefault(); e.stopPropagation(); onUp(); }, {passive:false});
+  }
+  bindTouchButton('btnAttack', ()=>{ if(locked && !craftingOpen) doAttackOrBreak(); });
+  bindTouchButton('btnPlace', ()=>{ if(locked && !craftingOpen) doInteract(); });
+  bindTouchButton('btnJump', ()=>{ keys['Space']=true; }, ()=>{ keys['Space']=false; });
+  bindTouchButton('btn3p', ()=>{ if(locked) thirdPerson = !thirdPerson; });
+}
 
 function swatchColor(id){ return '#' + BLOCK_COLOR[id].toString(16).padStart(6,'0'); }
 
@@ -1857,6 +1962,7 @@ function updateHotbarUI(){
     count_el.className='count'; count_el.textContent = count;
     slot.appendChild(count_el);
     slot.title = BLOCK_NAME[b];
+    slot.addEventListener('click', ()=>{ selectedSlot = i; updateHotbarUI(); updateHeldItemColor(); });
     el.appendChild(slot);
   });
   if(craftingOpen) renderCrafting();
@@ -1873,14 +1979,17 @@ function openCrafting(){
   craftingOpen = true;
   craftingModal.hidden = false;
   if(document.pointerLockElement) document.exitPointerLock();
+  if(isTouchDevice) locked = false;
   overlay.hidden = true;
   renderCrafting();
 }
 function closeCrafting(relock){
   craftingOpen = false;
   craftingModal.hidden = true;
-  if(relock) document.body.requestPointerLock();
-  else overlay.hidden = false;
+  if(relock){
+    if(isTouchDevice) locked = true;
+    else document.body.requestPointerLock();
+  } else if(!isTouchDevice) overlay.hidden = false;
 }
 function renderCrafting(){
   const invEl = document.getElementById('craftingInventory');

@@ -42,6 +42,13 @@ Then visit `http://localhost:8000`.
 - `E` — open/close crafting when standing near a Crafting Table
 - `V` — toggle third-person camera (see your own blocky character)
 
+On a phone or tablet (iPad included), the game automatically switches to touch controls — no setup needed, just open the page in Safari and tap to play:
+
+- Left thumb: on-screen joystick to move (push all the way to the edge to sprint)
+- Right side of the screen: drag to look around
+- ⛏ — break / attack, ▦ — place / interact (open a table, toggle a window or door), **JUMP**, **3rd** — third-person camera
+- Tap a hotbar slot to select it (also works with a mouse on desktop)
+
 ## Crafting
 
 Blocks you break go into your inventory (shown as counts on the hotbar), and placing a block spends one from it. You start with a single Crafting Table — place it on the ground, then right-click it (or stand nearby and press `E`) to open the crafting menu:
