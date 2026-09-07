@@ -18,6 +18,7 @@ const AIR=0, GRASS=1, DIRT=2, STONE=3, SAND=4, WOOD=5, LEAVES=6, PLANKS=7, WATER
 const CRAFTING_TABLE=10, BRICKS=11, STICK=12;
 const WINDOW=13, WINDOW_OPEN=14, DOOR=15, DOOR_OPEN=16;
 const SAPLING=17;
+const FLINT=18, FIRE=19;
 
 const BLOCK_COLOR = {
   [GRASS]:  0x5b8a3a,
@@ -37,18 +38,37 @@ const BLOCK_COLOR = {
   [DOOR]: 0x8a5a34,
   [DOOR_OPEN]: 0xa8815a,
   [SAPLING]: 0x5b8a3a,
+  [FLINT]: 0x5c5f66,
+  [FIRE]: 0xff8a2b,
 };
 const BLOCK_NAME = {
   [GRASS]:'Grass', [DIRT]:'Dirt', [STONE]:'Stone', [SAND]:'Sand', [WOOD]:'Wood',
   [LEAVES]:'Leaves', [PLANKS]:'Planks', [WATER]:'Water',
   [CRAFTING_TABLE]:'Crafting Table', [BRICKS]:'Bricks', [STICK]:'Stick',
   [WINDOW]:'Window', [WINDOW_OPEN]:'Window (open)', [DOOR]:'Door', [DOOR_OPEN]:'Door (open)',
-  [SAPLING]:'Sapling',
+  [SAPLING]:'Sapling', [FLINT]:'Flint', [FIRE]:'Fire',
 };
-const HOTBAR = [GRASS, DIRT, STONE, SAND, WOOD, LEAVES, PLANKS, WATER, CRAFTING_TABLE, BRICKS, WINDOW, DOOR];
-// A few hotbar items are structures, not plain materials — give them a distinct glyph on top of
+// Every item the player can ever select. The hotbar only shows HOTBAR_SIZE of these at a time —
+// the rest are reachable through the Items panel (the palette button, or the "I" key), which lets
+// the player swap any hotbar slot for anything in this list.
+const ALL_ITEMS = [GRASS, DIRT, STONE, SAND, WOOD, LEAVES, PLANKS, WATER, CRAFTING_TABLE, BRICKS, STICK, WINDOW, DOOR, FLINT];
+const HOTBAR_SIZE = 9;
+const DEFAULT_HOTBAR = [GRASS, DIRT, STONE, SAND, WOOD, PLANKS, CRAFTING_TABLE, DOOR, FLINT];
+const HOTBAR = DEFAULT_HOTBAR.slice();
+const HOTBAR_KEY = 'blockcraft_hotbar_v1';
+function saveHotbar(){ try{ localStorage.setItem(HOTBAR_KEY, JSON.stringify(HOTBAR)); }catch(e){} }
+function loadHotbar(){
+  try{
+    const raw = localStorage.getItem(HOTBAR_KEY);
+    if(!raw) return;
+    const arr = JSON.parse(raw);
+    if(Array.isArray(arr) && arr.length===HOTBAR_SIZE && arr.every(id=>ALL_ITEMS.includes(id)))
+      for(let i=0;i<HOTBAR_SIZE;i++) HOTBAR[i]=arr[i];
+  }catch(e){}
+}
+// A few items are structures/tools, not plain materials — give them a distinct glyph on top of
 // their swatch so they read at a glance instead of just being "another colored square."
-const HOTBAR_ICON = { [CRAFTING_TABLE]: '🛠️', [WINDOW]: '🪟', [DOOR]: '🚪' };
+const HOTBAR_ICON = { [CRAFTING_TABLE]: '🛠️', [WINDOW]: '🪟', [DOOR]: '🚪', [FLINT]: '🔥' };
 // Blocks with an open/closed state: right-clicking one toggles it to the other id in this map.
 const TOGGLE_MAP = { [WINDOW]:WINDOW_OPEN, [WINDOW_OPEN]:WINDOW, [DOOR]:DOOR_OPEN, [DOOR_OPEN]:DOOR };
 // Breaking the open form of a toggleable block gives you back its closed (placeable) form.
@@ -101,6 +121,7 @@ const RECIPES = [
   { name:'Bricks',         out:{id:BRICKS, qty:4},         in:[{id:STONE, qty:4}] },
   { name:'Window',         out:{id:WINDOW, qty:1},         in:[{id:SAND, qty:2}] },
   { name:'Door',           out:{id:DOOR, qty:1},            in:[{id:PLANKS, qty:3}] },
+  { name:'Flint',          out:{id:FLINT, qty:1},           in:[{id:STONE, qty:2}] },
 ];
 const inventory = {};
 function invCount(id){ return inventory[id]||0; }
@@ -129,10 +150,10 @@ function nearestCraftingTable(maxDist){
 }
 
 // ---------- Texture atlas (procedurally drawn pixel-art, no external image assets) ----------
-const TILE = 16, ATLAS_COLS = 4, ATLAS_ROWS = 5;
+const TILE = 16, ATLAS_COLS = 4, ATLAS_ROWS = 6;
 const T_GRASS_TOP=0, T_GRASS_SIDE=1, T_DIRT=2, T_STONE=3, T_SAND=4, T_LOG_SIDE=5, T_LOG_TOP=6,
       T_LEAVES=7, T_PLANKS=8, T_BEDROCK=9, T_CRAFT_TOP=10, T_CRAFT_SIDE=11, T_BRICKS=12, T_WATER=13,
-      T_WINDOW=14, T_WINDOW_OPEN=15, T_DOOR=16, T_DOOR_OPEN=17, T_SAPLING=18;
+      T_WINDOW=14, T_WINDOW_OPEN=15, T_DOOR=16, T_DOOR_OPEN=17, T_SAPLING=18, T_FLINT=19, T_FIRE=20;
 
 function hexRGB(hex){ return [(hex>>16)&255, (hex>>8)&255, hex&255]; }
 function rgbStr(r,g,b){ return `rgb(${r|0},${g|0},${b|0})`; }
@@ -321,6 +342,34 @@ function drawSapling(ctx,x0,y0){
     ctx.fillRect(px,py,1,1);
   }
 }
+function drawFlint(ctx,x0,y0){
+  fillTile(ctx,x0,y0,0x3a3d42);
+  speckle(ctx,x0,y0,0x3a3d42,50,14);
+  // a few sharp lighter facets to read as "knapped stone" rather than plain rock
+  const facet = shadeStr(0x8a90a0,1,10);
+  ctx.fillStyle = facet;
+  ctx.fillRect(x0+3,y0+3,5,2);
+  ctx.fillRect(x0+8,y0+7,4,2);
+  ctx.fillRect(x0+4,y0+11,6,2);
+  ctx.fillStyle = shadeStr(0x1c1e22,1,6);
+  ctx.fillRect(x0+9,y0+3,3,2);
+  ctx.fillRect(x0+2,y0+8,3,2);
+}
+function drawFire(ctx,x0,y0){
+  // drawn on a near-black base — combined with the glass bucket's transparency this reads as
+  // flickering flame rather than a solid tile
+  fillTile(ctx,x0,y0,0x120600);
+  ctx.fillStyle = '#c62b0e';
+  ctx.fillRect(x0+3,y0+9,10,6);
+  ctx.fillRect(x0+4,y0+6,8,4);
+  ctx.fillStyle = '#ff7a1a';
+  ctx.fillRect(x0+5,y0+7,6,6);
+  ctx.fillRect(x0+6,y0+4,4,4);
+  ctx.fillStyle = '#ffce4d';
+  ctx.fillRect(x0+6,y0+9,4,4);
+  ctx.fillRect(x0+7,y0+5,2,3);
+  speckle(ctx,x0,y0,0xff7a1a,10,20);
+}
 function buildAtlas(){
   const canvas = document.createElement('canvas');
   canvas.width = TILE*ATLAS_COLS;
@@ -328,7 +377,7 @@ function buildAtlas(){
   const ctx = canvas.getContext('2d');
   const draw = [drawGrassTop, drawGrassSide, drawDirt, drawStone, drawSand, drawLogSide, drawLogTop,
                 drawLeaves, drawPlanks, drawBedrock, drawCraftTop, drawCraftSide, drawBricks, drawWater,
-                drawWindow, drawWindowOpen, drawDoor, drawDoorOpen, drawSapling];
+                drawWindow, drawWindowOpen, drawDoor, drawDoorOpen, drawSapling, drawFlint, drawFire];
   draw.forEach((fn, i)=> fn(ctx, (i%ATLAS_COLS)*TILE, Math.floor(i/ATLAS_COLS)*TILE));
   const tex = new THREE.CanvasTexture(canvas);
   tex.magFilter = THREE.NearestFilter;
@@ -362,6 +411,8 @@ const BLOCK_TILES = {
   [DOOR]: {top:T_DOOR, side:T_DOOR, bottom:T_DOOR},
   [DOOR_OPEN]: {top:T_DOOR_OPEN, side:T_DOOR_OPEN, bottom:T_DOOR_OPEN},
   [SAPLING]: {top:T_SAPLING, side:T_SAPLING, bottom:T_SAPLING},
+  [FLINT]: {top:T_FLINT, side:T_FLINT, bottom:T_FLINT},
+  [FIRE]: {top:T_FIRE, side:T_FIRE, bottom:T_FIRE},
 };
 // per-face-direction UV winding (0/1 flags select u0/u1 and vBottom/vTop), aligned to FACES order below
 const UV_PATTERNS = [
@@ -561,7 +612,7 @@ const glassMaterial = new THREE.MeshLambertMaterial({ vertexColors: true, side: 
 // Any block that isn't fully opaque. A face between two blocks of the SAME transparent type is
 // skipped (no point rendering the seam between two adjacent water or window blocks); a face against
 // a *different* transparent type, or against AIR, still draws.
-const TRANSPARENT_BLOCKS = new Set([WATER, WINDOW, WINDOW_OPEN, DOOR_OPEN, SAPLING]);
+const TRANSPARENT_BLOCKS = new Set([WATER, WINDOW, WINDOW_OPEN, DOOR_OPEN, SAPLING, FIRE]);
 function bucketFor(b){ return b===WATER ? 'water' : (TRANSPARENT_BLOCKS.has(b) ? 'glass' : 'solid'); }
 
 function buildChunkGeometries(cx,cz){
@@ -1019,7 +1070,7 @@ function animateQuadrupedWalk(group, state, dt, moving, speedMul){
 const animals = [];
 // Ground for animals excludes tree material (WOOD/LEAVES) so they never end up standing in a
 // tree's trunk or canopy — only natural terrain and player-built blocks count as "ground".
-function isAnimalGround(b){ return b!==AIR && b!==WATER && b!==WOOD && b!==LEAVES && b!==WINDOW_OPEN && b!==DOOR_OPEN && b!==SAPLING; }
+function isAnimalGround(b){ return b!==AIR && b!==WATER && b!==WOOD && b!==LEAVES && b!==WINDOW_OPEN && b!==DOOR_OPEN && b!==SAPLING && b!==FIRE; }
 function groundHeightAt(x,z){
   const bx=Math.floor(x), bz=Math.floor(z);
   for(let y=WORLD_HEIGHT-1;y>=0;y--){
@@ -1344,6 +1395,8 @@ const SFX = {
   windowToggle(opening){ playWindowSlide(opening); },
   rainPatter(vol){ playNoise(0.12, vol, 5500, 0.002); },
   thunder(){ playNoise(1.6, 0.32, 220, 0.02); playTone(55, 1.2, 'sawtooth', 0.15, 30); },
+  igniteFire(){ playNoise(0.35, 0.3, 3000, 0.01); playTone(200, 0.3, 'sawtooth', 0.12, 500); },
+  fireCrackle(){ playNoise(0.06, 0.06, 4000, 0.002); },
 };
 lionRoarClip.load();
 
@@ -1867,6 +1920,81 @@ function updateSaplings(dt){
   if(saplingSpawnTimer<=0){ saplingSpawnTimer = SAPLING_SPAWN_CHECK_S; trySpawnSapling(); }
 }
 
+// ---------- Fire: light a wood block with flint, burns for half a Blockcraft day (30 real min) ----------
+const FIRE_DURATION_MS = 1800000; // 30 real minutes == half a 1-hour Blockcraft day
+const fires = new Map(); // key "x,y,z" -> {ignitedAt: ms-since-epoch}
+const fireLights = new Map();
+function tryIgniteFire(hit){
+  if(!hit || !hit.prev) return;
+  if(getBlock(hit.x,hit.y,hit.z)!==WOOD) return; // flint only catches wood
+  if(invCount(FLINT)<=0) return;
+  const {x,y,z} = hit.prev;
+  if(getBlock(x,y,z)!==AIR) return;
+  if(playerOverlapsCell(x,y,z)) return;
+  igniteFire(x,y,z);
+  invSub(FLINT,1);
+  saveInventory();
+  updateHotbarUI();
+  triggerSwing();
+}
+function igniteFire(x,y,z){
+  const key = x+','+y+','+z;
+  fires.set(key, { ignitedAt: Date.now() });
+  applyWorldEdit(x,y,z,FIRE,false);
+  if(fbReady) db.ref('world/fires/'+key).set({ t: firebase.database.ServerValue.TIMESTAMP });
+  SFX.igniteFire();
+}
+function extinguishFire(key){
+  const [x,y,z] = key.split(',').map(Number);
+  if(getBlock(x,y,z)===FIRE) applyWorldEdit(x,y,z,AIR,false);
+  fires.delete(key);
+  removeFireLight(key);
+  if(fbReady) db.ref('world/fires/'+key).remove();
+}
+let fireTickTimer = 0;
+function updateFires(dt){
+  fireTickTimer -= dt;
+  if(fireTickTimer<=0){
+    fireTickTimer = 3;
+    const now = Date.now();
+    for(const [key,info] of Array.from(fires.entries())){
+      if(now - info.ignitedAt >= FIRE_DURATION_MS) extinguishFire(key);
+    }
+  }
+  for(const [key, info] of fires){
+    const [x,y,z] = key.split(',').map(Number);
+    const light = ensureFireLight(key,x,y,z);
+    light.intensity = 1.1 + Math.random()*0.5;
+  }
+  for(const key of Array.from(fireLights.keys())) if(!fires.has(key)) removeFireLight(key);
+
+  fireCrackleTimer -= dt;
+  if(fireCrackleTimer<=0){
+    let near = false;
+    for(const key of fires.keys()){
+      const [x,y,z] = key.split(',').map(Number);
+      if(Math.hypot(x+0.5-player.pos.x, y+0.5-player.pos.y, z+0.5-player.pos.z) < 6){ near=true; break; }
+    }
+    if(near && locked){ fireCrackleTimer = 0.4+Math.random()*0.5; SFX.fireCrackle(); }
+    else fireCrackleTimer = 1;
+  }
+}
+let fireCrackleTimer = 1;
+function ensureFireLight(key,x,y,z){
+  let light = fireLights.get(key);
+  if(!light){
+    light = new THREE.PointLight(0xff8a2b, 1.3, 9, 2);
+    light.position.set(x+0.5, y+0.5, z+0.5);
+    scene.add(light);
+    fireLights.set(key, light);
+  }
+  return light;
+}
+function removeFireLight(key){
+  const light = fireLights.get(key);
+  if(light){ scene.remove(light); fireLights.delete(key); }
+}
+
 function findDoorCells(x,y,z){
   const isDoor = b => b===DOOR || b===DOOR_OPEN;
   let baseY = y;
@@ -1961,6 +2089,16 @@ function initMultiplayer(){
       saplings.delete(snap.key);
     });
 
+    db.ref('world/fires').on('child_added', snap=>{
+      const val = snap.val();
+      if(!val || fires.has(snap.key)) return;
+      fires.set(snap.key, { ignitedAt: val.t });
+    });
+    db.ref('world/fires').on('child_removed', snap=>{
+      fires.delete(snap.key);
+      removeFireLight(snap.key);
+    });
+
     db.ref('players').on('child_added', snap=>{
       if(snap.key===myId) return;
       addRemotePlayer(snap.key, snap.val());
@@ -2024,7 +2162,7 @@ function updateHandView(dt, moving, sprinting){
 
 function blockSolid(bx,by,bz){
   const b = getBlock(bx,by,bz);
-  return b!==AIR && b!==WATER && b!==WINDOW_OPEN && b!==DOOR_OPEN && b!==SAPLING;
+  return b!==AIR && b!==WATER && b!==WINDOW_OPEN && b!==DOOR_OPEN && b!==SAPLING && b!==FIRE;
 }
 function collidesBox(px,py,pz){
   const w = player.width/2;
@@ -2186,6 +2324,12 @@ function breakBlock(){
     SFX.breakBlock();
     return;
   }
+  if(b===FIRE){
+    extinguishFire(hit.x+','+hit.y+','+hit.z);
+    triggerSwing();
+    SFX.breakBlock();
+    return;
+  }
   applyWorldEdit(hit.x, hit.y, hit.z, AIR, false);
   if(COLLECTIBLE.has(b)){ invAdd(COLLECT_AS[b] || b, 1); saveInventory(); }
   if(b===WOOD) checkTreeSupport(hit.x, hit.y, hit.z);
@@ -2240,17 +2384,29 @@ const keys = {};
 let selectedSlot = 0;
 window.addEventListener('keydown', e=>{
   keys[e.code]=true;
-  if(e.code==='Escape' && craftingOpen){ closeCrafting(false); return; }
+  if(e.code==='Escape'){
+    if(craftingOpen){ closeCrafting(false); return; }
+    if(itemsOpen){ closeItems(false); return; }
+  }
   if(e.code==='KeyE'){
     if(craftingOpen){ closeCrafting(false); return; }
     if(locked && !isDead && nearestCraftingTable(4)) openCrafting();
+    return;
+  }
+  if(e.code==='KeyI'){
+    if(itemsOpen){ closeItems(true); return; }
+    if(craftingOpen) return;
+    if(locked && !isDead) openItems();
     return;
   }
   if(e.code==='KeyV' && locked){ thirdPerson = !thirdPerson; return; }
   if(e.code.startsWith('Digit')){
     let n = parseInt(e.code.slice(5),10);
     if(n===0) n = 10;
-    if(n>=1 && n<=HOTBAR.length){ selectedSlot = n-1; updateHotbarUI(); updateHeldItemColor(); }
+    if(n>=1 && n<=HOTBAR.length){
+      selectedSlot = n-1; updateHotbarUI(); updateHeldItemColor();
+      if(itemsOpen) renderItemsGrid();
+    }
   }
 });
 window.addEventListener('keyup', e=>{ keys[e.code]=false; });
@@ -2266,6 +2422,7 @@ function doAttackOrBreak(){ if(!tryAttack()) breakBlock(); }
 function doInteract(){
   const hit = raycastBlock();
   const hitBlock = hit ? getBlock(hit.x,hit.y,hit.z) : null;
+  if(HOTBAR[selectedSlot]===FLINT){ tryIgniteFire(hit); return; }
   if(hitBlock===CRAFTING_TABLE) openCrafting();
   else if(hitBlock in TOGGLE_MAP) toggleOpenable(hit.x, hit.y, hit.z, hitBlock);
   else placeBlock();
@@ -2421,13 +2578,16 @@ function updateHotbarUI(){
       slot.appendChild(icon);
     }
     const key = document.createElement('div');
-    key.className='key'; key.textContent = i<10 ? (i+1)%10 : ''; // slots past 10 are scroll-only
+    key.className='key'; key.textContent = i+1;
     slot.appendChild(key);
     const count_el = document.createElement('div');
     count_el.className='count'; count_el.textContent = count;
     slot.appendChild(count_el);
-    slot.title = BLOCK_NAME[b];
-    slot.addEventListener('click', ()=>{ selectedSlot = i; updateHotbarUI(); updateHeldItemColor(); });
+    slot.title = BLOCK_NAME[b] + ' (click again to change)';
+    slot.addEventListener('click', ()=>{
+      if(selectedSlot===i) openItems();
+      else { selectedSlot = i; updateHotbarUI(); updateHeldItemColor(); }
+    });
     el.appendChild(slot);
   });
   if(craftingOpen) renderCrafting();
@@ -2491,6 +2651,61 @@ function renderCrafting(){
   });
 }
 
+// ---------- Items panel (pick what goes in the currently-selected hotbar slot) ----------
+let itemsOpen = false;
+const itemsModal = document.getElementById('itemsModal');
+document.getElementById('itemsClose').addEventListener('click', ()=> closeItems(true));
+itemsModal.addEventListener('click', e=>{ if(e.target===itemsModal) closeItems(true); });
+document.getElementById('btnItems').addEventListener('click', ()=>{ if(locked && !isDead) openItems(); });
+function openItems(){
+  itemsOpen = true;
+  itemsModal.hidden = false;
+  if(document.pointerLockElement) document.exitPointerLock();
+  if(isTouchDevice) locked = false;
+  overlay.hidden = true;
+  renderItemsGrid();
+}
+function closeItems(relock){
+  itemsOpen = false;
+  itemsModal.hidden = true;
+  if(relock){
+    if(isTouchDevice) locked = true;
+    else document.body.requestPointerLock();
+  } else if(!isTouchDevice) overlay.hidden = false;
+}
+function renderItemsGrid(){
+  document.getElementById('itemsSlotNum').textContent = selectedSlot+1;
+  const grid = document.getElementById('itemsGrid');
+  grid.innerHTML = '';
+  ALL_ITEMS.forEach(id=>{
+    const tile = document.createElement('div');
+    tile.className = 'itemTile' + (HOTBAR[selectedSlot]===id ? ' active' : '');
+    const sw = document.createElement('div');
+    sw.className = 'swatch';
+    sw.style.background = swatchColor(id);
+    tile.appendChild(sw);
+    if(HOTBAR_ICON[id]){
+      const icon = document.createElement('div');
+      icon.className = 'icon';
+      icon.textContent = HOTBAR_ICON[id];
+      tile.appendChild(icon);
+    }
+    const label = document.createElement('div');
+    label.className = 'itemLabel';
+    label.textContent = BLOCK_NAME[id];
+    tile.appendChild(label);
+    tile.title = BLOCK_NAME[id];
+    tile.addEventListener('click', ()=>{
+      HOTBAR[selectedSlot] = id;
+      saveHotbar();
+      updateHotbarUI();
+      updateHeldItemColor();
+      renderItemsGrid();
+    });
+    grid.appendChild(tile);
+  });
+}
+
 // ---------- Init & loop ----------
 function init(){
   scene = new THREE.Scene();
@@ -2522,6 +2737,7 @@ function init(){
   generateWorld();
   loadEdits();
   loadInventory();
+  loadHotbar();
   rebuildAllChunks();
   spawnPlayer();
   spawnAnimals();
@@ -2560,6 +2776,7 @@ function animate(now){
   updateRespawns(dt);
   updateFallingClusters(dt);
   updateSaplings(dt);
+  updateFires(dt);
   updateDayNight();
   updateWeather(dt);
   broadcastPosition(now);

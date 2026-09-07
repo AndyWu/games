@@ -37,8 +37,9 @@ Then visit `http://localhost:8000`.
 - `Shift` — sprint
 - Mouse — look (click the page first to lock the pointer)
 - Left click — break block, or attack whatever animal/player you're looking at within range
-- Right click — place block (or open the crafting menu if you're looking at a Crafting Table, or toggle a window/door open or closed if you're looking at one)
-- `1`–`0` + mouse wheel — select block from hotbar (12 items now; wheel reaches the last two)
+- Right click — place block (or open the crafting menu if you're looking at a Crafting Table, toggle a window/door open or closed, or light a fire if you're holding Flint and aim at a wood block)
+- `1`–`9` + mouse wheel — select a hotbar slot
+- `I` (or click the currently-selected hotbar slot again, or the **Items ▾** button) — open the item picker and choose what that slot holds
 - `E` — open/close crafting when standing near a Crafting Table
 - `V` — toggle third-person camera (see your own blocky character)
 
@@ -46,8 +47,12 @@ On a phone or tablet (iPad included), the game automatically switches to touch c
 
 - Left thumb: on-screen joystick to move (push all the way to the edge to sprint)
 - Right side of the screen: drag to look around
-- ⛏ — break / attack, ▦ — place / interact (open a table, toggle a window or door), **JUMP**, **3rd** — third-person camera
-- Tap a hotbar slot to select it (also works with a mouse on desktop)
+- ⛏ — break / attack, ▦ — place / interact (open a table, toggle a window or door, light a fire), **JUMP**, **3rd** — third-person camera
+- Tap a hotbar slot to select it, tap it again (or the **Items ▾** button) to change what it holds
+
+## Hotbar & item picker
+
+The hotbar itself only shows 9 slots (keys `1`–`9`), but it's no longer stuck with a fixed set of 9 blocks — every item in the game (materials, structures, tools) lives in a single palette, and any slot can hold any of them. Click (or tap) a slot that's already selected, press `I`, or use the **Items ▾** button to open that palette and reassign the slot. Your choices are saved to this browser, so your hotbar layout is exactly how you left it next time.
 
 ## Crafting
 
@@ -59,8 +64,13 @@ Blocks you break go into your inventory (shown as counts on the hotbar), and pla
 - 4 Stone → 4 Bricks
 - 2 Sand → 1 Window
 - 3 Planks → 1 Door
+- 2 Stone → 1 Flint
 
 The Craft button lights up once you have enough materials. Your inventory (like your world edits) is saved to `localStorage`, so it persists across reloads.
+
+## Fire
+
+Select Flint from your hotbar (open the item picker if it isn't already assigned to a slot) and right-click a wood block to set it alight. Lighting a fire uses up one Flint. Fire burns for 30 real-world minutes — exactly half a Blockcraft day — then burns itself out; you can also put it out early by breaking the fire block directly. A burning fire gives off a warm flickering light and a soft crackling sound when you're nearby, and is synced through Firebase like any other world change, so everyone in the shared world sees the same fires burning (or going out) at the same time.
 
 ## Windows & doors
 

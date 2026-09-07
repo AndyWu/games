@@ -65,6 +65,22 @@
   .recipe .need.short{color:#e58a6f;}
   .recipe button{background:#5b8a3a;border:none;color:#fff;padding:8px 14px;border-radius:6px;cursor:pointer;font-size:13px;flex:none;}
   .recipe button:disabled{background:#555;cursor:not-allowed;opacity:0.5;}
+  #btnItems{position:fixed;bottom:104px;left:50%;transform:translateX(-50%);z-index:10;background:rgba(0,0,0,0.35);color:#fff;border:2px solid rgba(255,255,255,0.4);border-radius:8px;padding:5px 12px;font-size:12px;cursor:pointer;}
+  #btnItems:hover{background:rgba(0,0,0,0.55);}
+  #itemsModal{position:fixed;inset:0;z-index:31;background:rgba(0,0,0,0.55);display:flex;align-items:center;justify-content:center;}
+  #itemsPanel{background:#2b2320;color:#f2e9d8;width:min(520px,92vw);max-height:82vh;overflow:auto;border-radius:10px;border:2px solid #5a4632;box-shadow:0 10px 40px rgba(0,0,0,0.5);}
+  #itemsHeader{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid #5a4632;position:sticky;top:0;background:#2b2320;}
+  #itemsHeader h2{margin:0;font-size:1.2em;}
+  #itemsHeader p{margin:4px 0 0;font-size:12px;opacity:0.7;}
+  #itemsClose{background:none;border:none;color:#f2e9d8;font-size:1.1em;cursor:pointer;padding:4px 10px;border-radius:6px;}
+  #itemsClose:hover{background:rgba(255,255,255,0.12);}
+  #itemsGrid{padding:16px 18px;display:grid;grid-template-columns:repeat(auto-fill,minmax(78px,1fr));gap:10px;}
+  .itemTile{background:rgba(255,255,255,0.06);border:2px solid transparent;border-radius:8px;padding:8px 4px;display:flex;flex-direction:column;align-items:center;gap:6px;cursor:pointer;position:relative;}
+  .itemTile:hover{background:rgba(255,255,255,0.14);}
+  .itemTile.active{border-color:#fff;}
+  .itemTile .swatch{width:32px;height:32px;border-radius:5px;}
+  .itemTile .icon{position:absolute;top:24px;left:50%;transform:translate(-50%,-50%);font-size:20px;text-shadow:0 1px 2px rgba(0,0,0,0.5);}
+  .itemTile .itemLabel{font-size:11px;text-align:center;line-height:1.2;opacity:0.9;}
   [hidden]{display:none!important;}
 </style>
 </head>
@@ -76,7 +92,7 @@
 <div id="lightningFlash"></div>
 <div id="crosshair"></div>
 <div id="hotbar"></div>
-<div id="hint">Left click: break / attack &nbsp;·&nbsp; Right click: place (or open a table / toggle a window or door) &nbsp;·&nbsp; 1-0 + scroll: select block &nbsp;·&nbsp; E: craft &nbsp;·&nbsp; V: 3rd person &nbsp;·&nbsp; Esc: release mouse</div>
+<div id="hint">Left click: break / attack &nbsp;·&nbsp; Right click: place (or open a table / toggle a window or door / light a fire with flint) &nbsp;·&nbsp; 1-9 + scroll: select block &nbsp;·&nbsp; I: change block &nbsp;·&nbsp; E: craft &nbsp;·&nbsp; V: 3rd person &nbsp;·&nbsp; Esc: release mouse</div>
 <div id="craftHint">Right-click the table (or press E) to craft</div>
 <div id="touchControls" hidden>
   <div id="touchLookZone"></div>
@@ -94,6 +110,19 @@
     </div>
     <div id="craftingInventory"></div>
     <div id="craftingRecipes"></div>
+  </div>
+</div>
+<button id="btnItems">Items ▾</button>
+<div id="itemsModal" hidden>
+  <div id="itemsPanel">
+    <div id="itemsHeader">
+      <div>
+        <h2>Select Block</h2>
+        <p>Choose what goes in hotbar slot <span id="itemsSlotNum">1</span></p>
+      </div>
+      <button id="itemsClose" aria-label="Close">Close ✕</button>
+    </div>
+    <div id="itemsGrid"></div>
   </div>
 </div>
 <div id="overlay">
