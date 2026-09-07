@@ -820,6 +820,77 @@ function computeSkyExposure(x,z){
   }
   return exposed;
 }
+// ---------- Tree species colors ----------
+// Trees still all use the same generic WOOD/LEAVES block IDs — chopping any of them always gives
+// plain Wood/Leaves items, no new resource types — but each tree's trunk+canopy is tinted per a
+// species picked deterministically from its trunk's own (x,z), the same "no extra state to save"
+// trick day/night/weather/seasons already use. mul values are RGB multipliers applied on top of the
+// existing per-face lighting shade, not new textures. index 0 (untinted, [1,1,1]) is oak.
+const TREE_SPECIES = [
+  { id:'oak',     leafMul:[1,1,1],           woodMul:[1,1,1] },
+  { id:'pine',    leafMul:[0.55,0.85,0.60],  woodMul:[0.85,0.72,0.68] },
+  { id:'birch',   leafMul:[1.10,1.25,0.55],  woodMul:[1.65,1.60,1.40] },
+  { id:'willow',  leafMul:[0.85,1.15,0.75],  woodMul:[1.05,0.95,0.80] },
+  { id:'maple',   leafMul:[1.55,0.55,0.35],  woodMul:[0.95,0.88,0.82] },
+  { id:'redwood', leafMul:[0.55,0.82,0.58],  woodMul:[1.15,0.50,0.42] },
+  { id:'apple',   leafMul:[0.95,1.12,0.62],  woodMul:[1,1,1], fruitMul:[1.6,0.25,0.22] },
+];
+function speciesIndexForRoot(x,z){ return Math.floor(hash2(x+41,z+67)*TREE_SPECIES.length) % TREE_SPECIES.length; }
+// Bounded look for canopy near a wood run's top — gates tinting to things that actually look like a
+// tree (a trunk with leaves overhead) so ordinary player-built wood walls/floors stay untinted.
+function hasCanopyNear(x,y,z){
+  for(let dy=-1;dy<=2;dy++) for(let dx=-2;dx<=2;dx++) for(let dz=-2;dz<=2;dz++){
+    if(getBlock(x+dx,y+dy,z+dz)===LEAVES) return true;
+  }
+  return false;
+}
+// One pass per column (same cost class as computeSkyExposure, called right alongside it): walks
+// every contiguous WOOD run top-to-bottom and, if that run has canopy near its top, tags the whole
+// run with a species index (1-based; 0 = not tree wood) — so a tall/giant trunk is tinted
+// consistently end to end, not just near the top.
+function computeColumnTreeSpecies(x,z){
+  const species = new Uint8Array(WORLD_HEIGHT);
+  let runStart = -1;
+  for(let y=0;y<=WORLD_HEIGHT;y++){
+    const b = y<WORLD_HEIGHT ? getBlock(x,y,z) : AIR;
+    if(b===WOOD){
+      if(runStart<0) runStart = y;
+    } else if(runStart>=0){
+      if(hasCanopyNear(x,y-1,z)){
+        const sIdx = speciesIndexForRoot(x,z)+1;
+        for(let ry=runStart; ry<y; ry++) species[ry] = sIdx;
+      }
+      runStart = -1;
+    }
+  }
+  return species;
+}
+// For a LEAVES cell, find the (x,z) of whichever nearby WOOD column its canopy most likely belongs
+// to — checked ring-by-ring (closest first) within the same small spread plantTreeCells ever uses.
+function findTrunkColumnNear(x,y,z){
+  for(let r=0;r<=2;r++){
+    for(let dx=-r;dx<=r;dx++){
+      for(let dz=-r;dz<=r;dz++){
+        if(Math.max(Math.abs(dx),Math.abs(dz))!==r) continue;
+        for(let dy=-3;dy<=2;dy++){
+          if(getBlock(x+dx,y+dy,z+dz)===WOOD) return {x:x+dx, z:z+dz};
+        }
+      }
+    }
+  }
+  return null;
+}
+function treeTintAt(b,x,y,z,columnSpecies){
+  if(b===WOOD){
+    const sIdx = columnSpecies[y];
+    return sIdx>0 ? TREE_SPECIES[sIdx-1].woodMul : null;
+  }
+  const trunk = findTrunkColumnNear(x,y,z);
+  if(!trunk) return null;
+  const species = TREE_SPECIES[speciesIndexForRoot(trunk.x,trunk.z)];
+  if(species.fruitMul && hash2(x*7+y*13+3, z*11+y*17+5) < 0.12) return species.fruitMul;
+  return species.leafMul;
+}
 function buildChunkGeometries(cx,cz){
   const buckets = {
     solid: {positions:[],normals:[],colors:[],uvs:[],indices:[]},
@@ -830,6 +901,7 @@ function buildChunkGeometries(cx,cz){
   for(let x=x0;x<x0+CHUNK_SIZE;x++){
     for(let z=z0;z<z0+CHUNK_SIZE;z++){
       const skyExposed = computeSkyExposure(x,z);
+      const columnSpecies = computeColumnTreeSpecies(x,z);
       for(let y=0;y<WORLD_HEIGHT;y++){
         const b = getBlock(x,y,z);
         // Fire is rendered as its own non-solid crossed-billboard sprite (see ensureFireFx), not as
@@ -839,6 +911,7 @@ function buildChunkGeometries(cx,cz){
         const bucket = buckets[bucketFor(b)];
         const tiles = BLOCK_TILES[b];
         const indoorF = skyExposed[y] ? 1.0 : INDOOR_DARK_FACTOR;
+        const tint = (b===WOOD || b===LEAVES) ? treeTintAt(b,x,y,z,columnSpecies) : null;
         for(let fi=0; fi<FACES.length; fi++){
           const f = FACES[fi];
           const nb = getBlock(x+f.n[0], y+f.n[1], z+f.n[2]);
@@ -856,7 +929,8 @@ function buildChunkGeometries(cx,cz){
             const c = f.c[ci];
             bucket.positions.push(x+c[0], y+c[1], z+c[2]);
             bucket.normals.push(f.n[0],f.n[1],f.n[2]);
-            bucket.colors.push(shadeF,shadeF,shadeF);
+            if(tint) bucket.colors.push(shadeF*tint[0], shadeF*tint[1], shadeF*tint[2]);
+            else bucket.colors.push(shadeF,shadeF,shadeF);
             const [uf,vf] = pattern[ci];
             bucket.uvs.push(uf?u1:u0, vf?vTop:vBottom);
           }
