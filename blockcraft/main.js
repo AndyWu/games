@@ -631,6 +631,22 @@ const glassMaterial = new THREE.MeshLambertMaterial({ vertexColors: true, side: 
 const TRANSPARENT_BLOCKS = new Set([WATER, WINDOW, WINDOW_OPEN, DOOR_OPEN, SAPLING, FIRE, TORCH]);
 function bucketFor(b){ return b===WATER ? 'water' : (TRANSPARENT_BLOCKS.has(b) ? 'glass' : 'solid'); }
 
+// Blocks with a clear vertical path up to the sky get full outdoor light; anything with a solid
+// roof over it (a cave ceiling, a building's roof, a closed door/window blocking a doorway) is
+// darkened instead — otherwise every interior was exactly as bright as the surface, since the
+// hemisphere/sun lights have no concept of occlusion. Computed once per column per chunk rebuild
+// (top-down, O(WORLD_HEIGHT)) rather than per face, so it stays cheap.
+const INDOOR_DARK_FACTOR = 0.28;
+function computeSkyExposure(x,z){
+  const exposed = new Uint8Array(WORLD_HEIGHT);
+  let blocked = false;
+  for(let y=WORLD_HEIGHT-1; y>=0; y--){
+    exposed[y] = blocked ? 0 : 1;
+    const b = getBlock(x,y,z);
+    if(b!==AIR && !TRANSPARENT_BLOCKS.has(b)) blocked = true;
+  }
+  return exposed;
+}
 function buildChunkGeometries(cx,cz){
   const buckets = {
     solid: {positions:[],normals:[],colors:[],uvs:[],indices:[]},
@@ -640,11 +656,13 @@ function buildChunkGeometries(cx,cz){
   const x0=cx*CHUNK_SIZE, z0=cz*CHUNK_SIZE;
   for(let x=x0;x<x0+CHUNK_SIZE;x++){
     for(let z=z0;z<z0+CHUNK_SIZE;z++){
+      const skyExposed = computeSkyExposure(x,z);
       for(let y=0;y<WORLD_HEIGHT;y++){
         const b = getBlock(x,y,z);
         if(b===AIR) continue;
         const bucket = buckets[bucketFor(b)];
         const tiles = BLOCK_TILES[b];
+        const indoorF = skyExposed[y] ? 1.0 : INDOOR_DARK_FACTOR;
         for(let fi=0; fi<FACES.length; fi++){
           const f = FACES[fi];
           const nb = getBlock(x+f.n[0], y+f.n[1], z+f.n[2]);
@@ -653,7 +671,7 @@ function buildChunkGeometries(cx,cz){
           else if(TRANSPARENT_BLOCKS.has(nb) && nb!==b) draw = true;
           else draw = false;
           if(!draw) continue;
-          const shadeF = f.n[1]===1 ? 1.0 : (f.n[1]===-1 ? 0.5 : 0.75);
+          const shadeF = (f.n[1]===1 ? 1.0 : (f.n[1]===-1 ? 0.5 : 0.75)) * indoorF;
           const tileIdx = f.n[1]===1 ? tiles.top : (f.n[1]===-1 ? tiles.bottom : tiles.side);
           const {u0,u1,vBottom,vTop} = tileUV(tileIdx);
           const pattern = UV_PATTERNS[fi];
