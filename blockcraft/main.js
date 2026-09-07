@@ -539,7 +539,7 @@ function loadInventory(){
 }
 
 // ---------- Chunked mesh building ----------
-let scene, camera, renderer;
+let scene, camera, renderer, hemiLight, sunLight;
 const chunkMeshes = new Map();
 function chunkKey(cx,cz){ return cx+','+cz; }
 
@@ -1624,6 +1624,47 @@ function updateFallingClusters(dt){
   }
 }
 
+// ---------- Day/night cycle ----------
+// dayTime (0..1) is derived straight from the wall clock rather than accumulated frame-by-frame, so
+// every client (and a fresh page reload) is automatically on the same clock with no syncing needed.
+// 0 = midnight, 0.25 = sunrise, 0.5 = noon, 0.75 = sunset.
+const DAY_LENGTH_S = 3600; // 1 real hour per full day/night cycle
+const DAY_KEYFRAMES = [
+  { t:0.00, sky:0x05070f, hemi:0.22, sunI:0.00, sunC:0x223355 },
+  { t:0.20, sky:0x0d1330, hemi:0.25, sunI:0.00, sunC:0x223355 },
+  { t:0.25, sky:0xff9a56, hemi:0.55, sunI:0.55, sunC:0xffb066 },
+  { t:0.32, sky:0x8fd0ee, hemi:0.90, sunI:0.80, sunC:0xffffff },
+  { t:0.68, sky:0x8fd0ee, hemi:0.90, sunI:0.80, sunC:0xffffff },
+  { t:0.75, sky:0xff7f50, hemi:0.55, sunI:0.50, sunC:0xff8c50 },
+  { t:0.80, sky:0x0d1330, hemi:0.25, sunI:0.00, sunC:0x223355 },
+  { t:1.00, sky:0x05070f, hemi:0.22, sunI:0.00, sunC:0x223355 },
+];
+function lerpColorHex(a,b,t){
+  const ar=(a>>16)&255, ag=(a>>8)&255, ab=a&255;
+  const br=(b>>16)&255, bg=(b>>8)&255, bb=b&255;
+  return (Math.round(ar+(br-ar)*t)<<16) | (Math.round(ag+(bg-ag)*t)<<8) | Math.round(ab+(bb-ab)*t);
+}
+function currentDayTime(){ return (Date.now()/1000 % DAY_LENGTH_S) / DAY_LENGTH_S; }
+function updateDayNight(){
+  const dayTime = currentDayTime();
+  let k0 = DAY_KEYFRAMES[0], k1 = DAY_KEYFRAMES[DAY_KEYFRAMES.length-1];
+  for(let i=0;i<DAY_KEYFRAMES.length-1;i++){
+    if(dayTime>=DAY_KEYFRAMES[i].t && dayTime<=DAY_KEYFRAMES[i+1].t){ k0=DAY_KEYFRAMES[i]; k1=DAY_KEYFRAMES[i+1]; break; }
+  }
+  const span = k1.t-k0.t;
+  const lt = span>0 ? (dayTime-k0.t)/span : 0;
+  const skyColor = lerpColorHex(k0.sky, k1.sky, lt);
+  scene.background.setHex(skyColor);
+  scene.fog.color.setHex(skyColor);
+  hemiLight.intensity = k0.hemi + (k1.hemi-k0.hemi)*lt;
+  sunLight.intensity = k0.sunI + (k1.sunI-k0.sunI)*lt;
+  sunLight.color.setHex(lerpColorHex(k0.sunC, k1.sunC, lt));
+  const theta = dayTime*Math.PI*2;
+  const sunHeight = Math.sin(theta - Math.PI/2);
+  const R = 150;
+  sunLight.position.set(Math.cos(theta)*R, Math.max(5, sunHeight*R*0.6+40), Math.sin(theta)*R);
+}
+
 // ---------- Saplings: little trees that randomly appear on grass and slowly grow into full trees ----------
 const SAPLING_MAX_STAGE = 3;          // height in blocks while still growing, before it becomes a real tree
 const SAPLING_STAGE_MS = 40000;       // real time between each extra block of height
@@ -2334,10 +2375,11 @@ function init(){
   renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
   document.body.appendChild(renderer.domElement);
 
-  scene.add(new THREE.HemisphereLight(0xffffff, 0x445533, 0.9));
-  const sun = new THREE.DirectionalLight(0xffffff, 0.8);
-  sun.position.set(80,120,40);
-  scene.add(sun);
+  hemiLight = new THREE.HemisphereLight(0xffffff, 0x445533, 0.9);
+  scene.add(hemiLight);
+  sunLight = new THREE.DirectionalLight(0xffffff, 0.8);
+  sunLight.position.set(80,120,40);
+  scene.add(sunLight);
 
   characterMesh = createCharacterMesh();
   characterMesh.visible = false;
@@ -2388,6 +2430,7 @@ function animate(now){
   updateRespawns(dt);
   updateFallingClusters(dt);
   updateSaplings(dt);
+  updateDayNight();
   broadcastPosition(now);
 
   if(thirdPerson){
