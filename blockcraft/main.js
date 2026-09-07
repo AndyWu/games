@@ -1908,8 +1908,16 @@ function lerpColorHex(a,b,t){
   return (Math.round(ar+(br-ar)*t)<<16) | (Math.round(ag+(bg-ag)*t)<<8) | Math.round(ab+(bb-ab)*t);
 }
 function currentDayTime(){ return (Date.now()/1000 % DAY_LENGTH_S) / DAY_LENGTH_S; }
+let lastWorldTimeLabel = null;
 function updateDayNight(){
   const dayTime = currentDayTime();
+  const totalMinutes = Math.floor(dayTime*24*60) % (24*60);
+  const timeText = String(Math.floor(totalMinutes/60)).padStart(2,'0')+':'+String(totalMinutes%60).padStart(2,'0');
+  if(timeText !== lastWorldTimeLabel){
+    lastWorldTimeLabel = timeText;
+    const el = document.getElementById('worldTimeLabel');
+    if(el) el.textContent = timeText;
+  }
   let k0 = DAY_KEYFRAMES[0], k1 = DAY_KEYFRAMES[DAY_KEYFRAMES.length-1];
   for(let i=0;i<DAY_KEYFRAMES.length-1;i++){
     if(dayTime>=DAY_KEYFRAMES[i].t && dayTime<=DAY_KEYFRAMES[i+1].t){ k0=DAY_KEYFRAMES[i]; k1=DAY_KEYFRAMES[i+1]; break; }
