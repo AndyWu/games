@@ -39,7 +39,7 @@ Then visit `http://localhost:8000`.
 - Left click — break block, or attack whatever animal/player you're looking at within range
 - Right click — place block (or open the crafting menu if you're looking at a Crafting Table, toggle a window/door open or closed, or light a fire if you're holding Flint and aim at a wood block)
 - `1`–`9` + mouse wheel — select a hotbar slot
-- `I` (or click the currently-selected hotbar slot again, or the **Items ▾** button) — open the item picker and choose what that slot holds
+- `I` (or click the currently-selected hotbar slot again, or the **🎒 Inventory** button) — open your inventory and choose what that slot holds
 - `E` — open/close crafting when standing near a Crafting Table
 - `V` — toggle third-person camera (see your own blocky character)
 
@@ -48,11 +48,13 @@ On a phone or tablet (iPad included), the game automatically switches to touch c
 - Left thumb: on-screen joystick to move (push all the way to the edge to sprint)
 - Right side of the screen: drag to look around
 - ⛏ — break / attack, ▦ — place / interact (open a table, toggle a window or door, light a fire), **JUMP**, **3rd** — third-person camera
-- Tap a hotbar slot to select it, tap it again (or the **Items ▾** button) to change what it holds
+- Tap a hotbar slot to select it, tap it again (or the **🎒 Inventory** button) to change what it holds
 
-## Hotbar & item picker
+## Inventory & hotbar
 
-The hotbar itself only shows 9 slots (keys `1`–`9`), but it's no longer stuck with a fixed set of 9 blocks — every item in the game (materials, structures, tools) lives in a single palette, and any slot can hold any of them. Click (or tap) a slot that's already selected, press `I`, or use the **Items ▾** button to open that palette and reassign the slot. Your choices are saved to this browser, so your hotbar layout is exactly how you left it next time.
+Every player has their own inventory — everything you're currently holding, with live counts, private to you and saved to this browser (it isn't shared or visible to other players in the multiplayer world). Open it with `I`, the **🎒 Inventory** button, or by clicking a hotbar slot that's already selected. It's split into what you actually have ("Your items", with a count on each) and everything else you could still obtain or craft ("Not yet obtained", grayed out) — tap any tile, held or not, to put it in the currently-selected hotbar slot.
+
+The hotbar itself only shows 9 slots (keys `1`–`9`) at a time, but any slot can hold any item in the game — materials, structures, tools, all reachable from the same inventory screen. Your hotbar layout is saved per-browser, so it's exactly how you left it next time.
 
 ## Crafting
 

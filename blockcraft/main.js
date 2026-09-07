@@ -2717,37 +2717,58 @@ function closeItems(relock){
     else document.body.requestPointerLock();
   } else if(!isTouchDevice) overlay.hidden = false;
 }
+function makeItemTile(id){
+  const count = invCount(id);
+  const tile = document.createElement('div');
+  tile.className = 'itemTile' + (HOTBAR[selectedSlot]===id ? ' active' : '') + (count<=0 ? ' empty' : '');
+  const sw = document.createElement('div');
+  sw.className = 'swatch';
+  sw.style.background = swatchColor(id);
+  tile.appendChild(sw);
+  if(HOTBAR_ICON[id]){
+    const icon = document.createElement('div');
+    icon.className = 'icon';
+    icon.textContent = HOTBAR_ICON[id];
+    tile.appendChild(icon);
+  }
+  const countEl = document.createElement('div');
+  countEl.className = 'itemCount';
+  countEl.textContent = count>0 ? count : '';
+  tile.appendChild(countEl);
+  const label = document.createElement('div');
+  label.className = 'itemLabel';
+  label.textContent = BLOCK_NAME[id];
+  tile.appendChild(label);
+  tile.title = BLOCK_NAME[id] + (count>0 ? ` — you have ${count}` : ' — you have none yet');
+  tile.addEventListener('click', ()=>{
+    HOTBAR[selectedSlot] = id;
+    saveHotbar();
+    updateHotbarUI();
+    updateHeldItemColor();
+    renderItemsGrid();
+  });
+  return tile;
+}
 function renderItemsGrid(){
   document.getElementById('itemsSlotNum').textContent = selectedSlot+1;
   const grid = document.getElementById('itemsGrid');
   grid.innerHTML = '';
-  ALL_ITEMS.forEach(id=>{
-    const tile = document.createElement('div');
-    tile.className = 'itemTile' + (HOTBAR[selectedSlot]===id ? ' active' : '');
-    const sw = document.createElement('div');
-    sw.className = 'swatch';
-    sw.style.background = swatchColor(id);
-    tile.appendChild(sw);
-    if(HOTBAR_ICON[id]){
-      const icon = document.createElement('div');
-      icon.className = 'icon';
-      icon.textContent = HOTBAR_ICON[id];
-      tile.appendChild(icon);
-    }
-    const label = document.createElement('div');
-    label.className = 'itemLabel';
-    label.textContent = BLOCK_NAME[id];
-    tile.appendChild(label);
-    tile.title = BLOCK_NAME[id];
-    tile.addEventListener('click', ()=>{
-      HOTBAR[selectedSlot] = id;
-      saveHotbar();
-      updateHotbarUI();
-      updateHeldItemColor();
-      renderItemsGrid();
-    });
-    grid.appendChild(tile);
-  });
+  const held = ALL_ITEMS.filter(id => invCount(id)>0);
+  const rest = ALL_ITEMS.filter(id => invCount(id)<=0);
+  if(held.length>0){
+    const lbl = document.createElement('div');
+    lbl.className = 'sectionLabel';
+    lbl.textContent = 'Your items';
+    grid.appendChild(lbl);
+    held.forEach(id => grid.appendChild(makeItemTile(id)));
+  }
+  if(rest.length>0){
+    const lbl = document.createElement('div');
+    lbl.className = 'sectionLabel';
+    lbl.textContent = 'Not yet obtained';
+    grid.appendChild(lbl);
+    rest.forEach(id => grid.appendChild(makeItemTile(id)));
+  }
 }
 
 // ---------- Init & loop ----------

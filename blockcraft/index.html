@@ -78,9 +78,12 @@
   .itemTile{background:rgba(255,255,255,0.06);border:2px solid transparent;border-radius:8px;padding:8px 4px;display:flex;flex-direction:column;align-items:center;gap:6px;cursor:pointer;position:relative;}
   .itemTile:hover{background:rgba(255,255,255,0.14);}
   .itemTile.active{border-color:#fff;}
+  .itemTile.empty{opacity:0.4;}
   .itemTile .swatch{width:32px;height:32px;border-radius:5px;}
   .itemTile .icon{position:absolute;top:24px;left:50%;transform:translate(-50%,-50%);font-size:20px;text-shadow:0 1px 2px rgba(0,0,0,0.5);}
   .itemTile .itemLabel{font-size:11px;text-align:center;line-height:1.2;opacity:0.9;}
+  .itemTile .itemCount{position:absolute;top:4px;right:6px;font-size:11px;font-weight:700;color:#fff;text-shadow:0 0 3px #000;}
+  #itemsGrid .sectionLabel{grid-column:1/-1;font-size:11px;text-transform:uppercase;letter-spacing:0.05em;opacity:0.55;margin:6px 0 -2px;}
   [hidden]{display:none!important;}
 </style>
 </head>
@@ -92,7 +95,7 @@
 <div id="lightningFlash"></div>
 <div id="crosshair"></div>
 <div id="hotbar"></div>
-<div id="hint">Left click: break / attack &nbsp;·&nbsp; Right click: place (or open a table / toggle a window or door / light a fire with flint) &nbsp;·&nbsp; 1-9 + scroll: select block &nbsp;·&nbsp; I: change block &nbsp;·&nbsp; E: craft &nbsp;·&nbsp; V: 3rd person &nbsp;·&nbsp; Esc: release mouse</div>
+<div id="hint">Left click: break / attack &nbsp;·&nbsp; Right click: place (or open a table / toggle a window or door / light a fire with flint) &nbsp;·&nbsp; 1-9 + scroll: select block &nbsp;·&nbsp; I: inventory &nbsp;·&nbsp; E: craft &nbsp;·&nbsp; V: 3rd person &nbsp;·&nbsp; Esc: release mouse</div>
 <div id="craftHint">Right-click the table (or press E) to craft</div>
 <div id="touchControls" hidden>
   <div id="touchLookZone"></div>
@@ -112,13 +115,13 @@
     <div id="craftingRecipes"></div>
   </div>
 </div>
-<button id="btnItems">Items ▾</button>
+<button id="btnItems">🎒 Inventory</button>
 <div id="itemsModal" hidden>
   <div id="itemsPanel">
     <div id="itemsHeader">
       <div>
-        <h2>Select Block</h2>
-        <p>Choose what goes in hotbar slot <span id="itemsSlotNum">1</span></p>
+        <h2>Inventory</h2>
+        <p>Tap an item to put it in hotbar slot <span id="itemsSlotNum">1</span></p>
       </div>
       <button id="itemsClose" aria-label="Close">Close ✕</button>
     </div>
