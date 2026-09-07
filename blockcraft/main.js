@@ -1409,8 +1409,15 @@ const SFX = {
   roar(){ playRoar(); },
   doorToggle(opening){ playDoorCreak(opening); },
   windowToggle(opening){ playWindowSlide(opening); },
-  rainPatter(vol){ playNoise(0.12, vol, 5500, 0.002); },
-  thunder(){ playNoise(1.6, 0.32, 220, 0.02); playTone(55, 1.2, 'sawtooth', 0.15, 30); },
+  // A soft attack rounds the transient off into a light "patter" instead of a percussive tap, and
+  // randomizing the tone/length each drop keeps rapid-fire hits from reading as one mechanical loop.
+  rainPatter(vol){ playNoise(0.08+Math.random()*0.06, vol, 4200+Math.random()*3000, 0.025); },
+  // A short bright crack up front (the "snap"), then the existing low rolling rumble follows it.
+  thunder(){
+    playNoise(0.18, 0.28, 6000, 0.002);
+    playNoise(1.6, 0.32, 220, 0.02);
+    playTone(55, 1.2, 'sawtooth', 0.15, 30);
+  },
   igniteFire(){ playNoise(0.35, 0.3, 3000, 0.01); playTone(200, 0.3, 'sawtooth', 0.12, 500); },
   fireCrackle(){ playNoise(0.06, 0.06, 4000, 0.002); },
   windGust(vol, filterFreq){ playNoise(1.4, vol, filterFreq, 0.3); },
@@ -1906,8 +1913,8 @@ function updateWeather(dt){
   if(rain>0 && locked){
     rainSoundTimer -= dt;
     if(rainSoundTimer<=0){
-      rainSoundTimer = 0.05 + Math.random()*0.08;
-      SFX.rainPatter(Math.min(0.12, 0.03 + rain*0.05));
+      rainSoundTimer = 0.07 + Math.random()*0.11;
+      SFX.rainPatter(Math.min(0.08, 0.02 + rain*0.035));
     }
   }
   if(thunderActive && locked){
