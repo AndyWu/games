@@ -48,6 +48,7 @@ const ATTACK_ANGLE_COS = Math.cos(30 * Math.PI/180);
 const AGGRO_RADIUS = 6;
 const DEAGGRO_RADIUS = 11;
 const RETALIATE_MS = 8000;
+const FALL_DAMAGE_FREE_BLOCKS = 3; // first 3 blocks of any fall are damage-free, like stepping down normally
 
 // HP is scaled against the 20-HP (10-heart) human baseline to roughly track real-world size/toughness:
 // sheep and dogs are small and fragile; cows are human-sized; giraffes are big but not armored;
@@ -81,6 +82,7 @@ function craft(recipe){
   invAdd(recipe.out.id, recipe.out.qty);
   saveInventory();
   updateHotbarUI();
+  SFX.craft();
   return true;
 }
 
@@ -559,6 +561,7 @@ function spawnPlayer(){
   const h = heightAt(x,z);
   player.pos.set(x+0.5, h+2, z+0.5);
   player.vel.set(0,0,0);
+  player.fallFrom = player.pos.y;
 }
 
 // ---------- Blocky character model (the player's own body, and other connected players) ----------
@@ -633,30 +636,123 @@ function colorForId(id){
   return new THREE.Color(`hsl(${h%360},60%,55%)`).getHex();
 }
 
-// ---------- Animal models (blocky quadrupeds) ----------
-function animalBox(w,h,d,color){
-  return new THREE.Mesh(new THREE.BoxGeometry(w,h,d), new THREE.MeshLambertMaterial({ color }));
+// ---------- Animal models (blocky quadrupeds, with procedurally-drawn hide textures) ----------
+function fillTileSized(ctx,size,baseHex){ ctx.fillStyle = rgbStr(...hexRGB(baseHex)); ctx.fillRect(0,0,size,size); }
+function speckleSized(ctx,size,baseHex,count,jitter){
+  for(let i=0;i<count;i++){
+    const px=Math.floor(Math.random()*size), py=Math.floor(Math.random()*size);
+    ctx.fillStyle = shadeStr(baseHex, 0.8+Math.random()*0.4, jitter||0);
+    ctx.fillRect(px,py,1,1);
+  }
+}
+function blobPatch(ctx,x,y,w,h){
+  [[0.5,0.5,0.5,0.5],[0.2,0.3,0.32,0.32],[0.75,0.65,0.3,0.32]].forEach(([cx,cy,rw,rh])=>{
+    ctx.beginPath();
+    ctx.ellipse(x+w*cx, y+h*cy, w*rw, h*rh, 0, 0, Math.PI*2);
+    ctx.fill();
+  });
+}
+function buildHideTexture(drawFn){
+  const size = 32;
+  const canvas = document.createElement('canvas');
+  canvas.width = size; canvas.height = size;
+  drawFn(canvas.getContext('2d'), size);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.magFilter = THREE.NearestFilter;
+  tex.minFilter = THREE.NearestFilter;
+  tex.generateMipmaps = false;
+  return tex;
+}
+const ANIMAL_HIDE = {
+  cow: buildHideTexture((ctx,size)=>{
+    fillTileSized(ctx,size,0xe8e4d8);
+    speckleSized(ctx,size,0xe8e4d8,50,8);
+    ctx.fillStyle = 'rgb(35,35,35)';
+    blobPatch(ctx, 2, 3, 14, 12);
+    blobPatch(ctx, 16, 15, 14, 14);
+  }),
+  sheep: buildHideTexture((ctx,size)=>{
+    fillTileSized(ctx,size,0xebe6d6);
+    for(let i=0;i<28;i++){
+      const x=Math.random()*size, y=Math.random()*size, r=1.4+Math.random()*1.6;
+      ctx.fillStyle = shadeStr(0xebe6d6, 0.8+Math.random()*0.35, 6);
+      ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.fill();
+    }
+  }),
+  dog: buildHideTexture((ctx,size)=>{
+    fillTileSized(ctx,size,0x8a5a34);
+    speckleSized(ctx,size,0x8a5a34,70,12);
+    for(let x=0;x<size;x+=2){
+      if(Math.random()<0.5){
+        ctx.fillStyle = shadeStr(0x8a5a34, 0.65+Math.random()*0.3, 6);
+        ctx.fillRect(x, Math.random()*size*0.5, 1, size*0.35+Math.random()*size*0.3);
+      }
+    }
+  }),
+  giraffe: buildHideTexture((ctx,size)=>{
+    fillTileSized(ctx,size,0xd8b26a);
+    speckleSized(ctx,size,0xd8b26a,20,6);
+    ctx.fillStyle = 'rgb(139,90,43)';
+    for(let i=0;i<9;i++){
+      const x=Math.random()*size, y=Math.random()*size, r=size*0.1+Math.random()*size*0.07;
+      const pts = 6+Math.floor(Math.random()*3);
+      ctx.beginPath();
+      for(let p=0;p<=pts;p++){
+        const ang=(p/pts)*Math.PI*2, rr=r*(0.7+Math.random()*0.5);
+        const px=x+Math.cos(ang)*rr, py=y+Math.sin(ang)*rr;
+        p===0 ? ctx.moveTo(px,py) : ctx.lineTo(px,py);
+      }
+      ctx.closePath(); ctx.fill();
+    }
+  }),
+  lion: buildHideTexture((ctx,size)=>{
+    fillTileSized(ctx,size,0xc99a4e);
+    speckleSized(ctx,size,0xc99a4e,60,10);
+  }),
+  elephant: buildHideTexture((ctx,size)=>{
+    fillTileSized(ctx,size,0x9a9a9a);
+    for(let i=0;i<55;i++){
+      const x=Math.floor(Math.random()*size), y=Math.floor(Math.random()*size);
+      ctx.fillStyle = shadeStr(0x9a9a9a, 0.75+Math.random()*0.35, 8);
+      ctx.fillRect(x,y, 1+Math.floor(Math.random()*2), 1+Math.floor(Math.random()*2));
+    }
+    ctx.strokeStyle = 'rgba(60,60,60,0.2)';
+    for(let i=0;i<5;i++){
+      const y = Math.random()*size;
+      ctx.beginPath();
+      ctx.moveTo(0,y);
+      ctx.bezierCurveTo(size*0.3,y+Math.random()*5-2.5, size*0.7,y+Math.random()*5-2.5, size,y);
+      ctx.stroke();
+    }
+  }),
+};
+const ANIMAL_HIDE_MAT = {};
+for(const type of ANIMAL_TYPES) ANIMAL_HIDE_MAT[type] = new THREE.MeshLambertMaterial({ map: ANIMAL_HIDE[type] });
+
+function animalBox(w,h,d,colorOrMat){
+  const mat = (colorOrMat instanceof THREE.Material) ? colorOrMat : new THREE.MeshLambertMaterial({ color: colorOrMat });
+  return new THREE.Mesh(new THREE.BoxGeometry(w,h,d), mat);
 }
 function makeQuadruped(opts){
   const g = new THREE.Group();
   const legH = opts.bodyY - opts.bodyH/2;
-  const body = animalBox(opts.bodyW, opts.bodyH, opts.bodyD, opts.bodyColor);
+  const body = animalBox(opts.bodyW, opts.bodyH, opts.bodyD, opts.bodyMat);
   body.position.set(0, opts.bodyY, 0);
   g.add(body);
 
   const lx = opts.bodyW/2 - opts.legW*0.8;
   const lz = opts.bodyD/2 - opts.legW*0.8;
-  const legColor = opts.legColor || opts.bodyColor;
+  const legMat = opts.legMat || opts.bodyMat;
   const legPositions = [[-lx,-lz],[lx,-lz],[-lx,lz],[lx,lz]]; // FL, FR, BL, BR (forward = -Z)
   const legs = legPositions.map(([px,pz])=>{
-    const leg = animalBox(opts.legW, legH, opts.legW, legColor);
+    const leg = animalBox(opts.legW, legH, opts.legW, legMat);
     leg.geometry.translate(0,-legH/2,0);
     leg.position.set(px, legH, pz);
     g.add(leg);
     return leg;
   });
 
-  const head = animalBox(opts.headW, opts.headH, opts.headD, opts.headColor || opts.bodyColor);
+  const head = animalBox(opts.headW, opts.headH, opts.headD, opts.headMat || opts.bodyMat);
   head.position.set(0, opts.headY, opts.headZ);
   g.add(head);
 
@@ -667,24 +763,24 @@ function makeQuadruped(opts){
 }
 const ANIMAL_BUILDERS = {
   cow(){
+    const hide = ANIMAL_HIDE_MAT.cow;
     return makeQuadruped({
-      bodyW:1.0, bodyH:0.65, bodyD:0.5, bodyY:0.75, bodyColor:0xe8e4d8,
-      legW:0.14, legColor:0xe8e4d8,
-      headW:0.32, headH:0.32, headD:0.3, headColor:0xe8e4d8, headY:0.85, headZ:-0.5,
+      bodyW:1.0, bodyH:0.65, bodyD:0.5, bodyY:0.75, bodyMat:hide,
+      legW:0.14,
+      headW:0.32, headH:0.32, headD:0.3, headY:0.85, headZ:-0.5,
       extras(g){
-        const p1=animalBox(0.32,0.16,0.52,0x2a2a2a); p1.position.set(-0.2,0.98,0); g.add(p1);
-        const p2=animalBox(0.28,0.16,0.3,0x2a2a2a); p2.position.set(0.22,0.65,-0.05); g.add(p2);
         const snout=animalBox(0.2,0.14,0.12,0xd9a0a0); snout.position.set(0,0.78,-0.67); g.add(snout);
-        const earL=animalBox(0.12,0.05,0.05,0xe8e4d8); earL.position.set(-0.2,0.95,-0.46); g.add(earL);
-        const earR=animalBox(0.12,0.05,0.05,0xe8e4d8); earR.position.set(0.2,0.95,-0.46); g.add(earR);
+        const earL=animalBox(0.12,0.05,0.05,hide); earL.position.set(-0.2,0.95,-0.46); g.add(earL);
+        const earR=animalBox(0.12,0.05,0.05,hide); earR.position.set(0.2,0.95,-0.46); g.add(earR);
       },
     });
   },
   sheep(){
+    const hide = ANIMAL_HIDE_MAT.sheep;
     return makeQuadruped({
-      bodyW:0.7, bodyH:0.55, bodyD:0.45, bodyY:0.5, bodyColor:0xebe6d6,
-      legW:0.1, legColor:0x3a3a3a,
-      headW:0.24, headH:0.22, headD:0.22, headColor:0x3a3a3a, headY:0.55, headZ:-0.38,
+      bodyW:0.7, bodyH:0.55, bodyD:0.45, bodyY:0.5, bodyMat:hide,
+      legW:0.1, legMat:0x3a3a3a,
+      headW:0.24, headH:0.22, headD:0.22, headMat:0x3a3a3a, headY:0.55, headZ:-0.38,
       extras(g){
         const earL=animalBox(0.1,0.05,0.05,0x3a3a3a); earL.position.set(-0.14,0.58,-0.32); g.add(earL);
         const earR=animalBox(0.1,0.05,0.05,0x3a3a3a); earR.position.set(0.14,0.58,-0.32); g.add(earR);
@@ -692,54 +788,56 @@ const ANIMAL_BUILDERS = {
     });
   },
   dog(){
+    const hide = ANIMAL_HIDE_MAT.dog;
     return makeQuadruped({
-      bodyW:0.5, bodyH:0.3, bodyD:0.26, bodyY:0.4, bodyColor:0x8a5a34,
-      legW:0.08, legColor:0x8a5a34,
-      headW:0.22, headH:0.2, headD:0.22, headColor:0x8a5a34, headY:0.48, headZ:-0.3,
+      bodyW:0.5, bodyH:0.3, bodyD:0.26, bodyY:0.4, bodyMat:hide,
+      legW:0.08,
+      headW:0.22, headH:0.2, headD:0.22, headY:0.48, headZ:-0.3,
       extras(g){
         const earL=animalBox(0.06,0.14,0.1,0x5a3a20); earL.position.set(-0.12,0.56,-0.32); g.add(earL);
         const earR=animalBox(0.06,0.14,0.1,0x5a3a20); earR.position.set(0.12,0.56,-0.32); g.add(earR);
-        const tail=animalBox(0.06,0.06,0.26,0x8a5a34); tail.position.set(0,0.48,0.26); tail.rotation.x=0.5; g.add(tail);
+        const tail=animalBox(0.06,0.06,0.26,hide); tail.position.set(0,0.48,0.26); tail.rotation.x=0.5; g.add(tail);
       },
     });
   },
   giraffe(){
+    const hide = ANIMAL_HIDE_MAT.giraffe;
     return makeQuadruped({
-      bodyW:0.6, bodyH:0.55, bodyD:0.4, bodyY:1.5, bodyColor:0xd8b26a,
-      legW:0.13, legColor:0xd8b26a,
-      headW:0.22, headH:0.28, headD:0.26, headColor:0xd8b26a, headY:2.55, headZ:-0.4,
+      bodyW:0.6, bodyH:0.55, bodyD:0.4, bodyY:1.5, bodyMat:hide,
+      legW:0.13,
+      headW:0.22, headH:0.28, headD:0.26, headY:2.55, headZ:-0.4,
       extras(g){
-        const neck=animalBox(0.22,1.15,0.22,0xd8b26a);
+        const neck=animalBox(0.22,1.15,0.22,hide);
         neck.position.set(0,1.98,-0.32); neck.rotation.x=-0.18; g.add(neck);
-        const spot=(x,y,z)=>{ const s=animalBox(0.12,0.12,0.1,0xa5763a); s.position.set(x,y,z); g.add(s); };
-        spot(-0.2,1.6,0.08); spot(0.18,1.35,-0.08); spot(-0.1,1.25,0.15); spot(0.1,1.7,0.1);
         const hornL=animalBox(0.05,0.14,0.05,0x8a6a3a); hornL.position.set(-0.08,2.78,-0.42); g.add(hornL);
         const hornR=animalBox(0.05,0.14,0.05,0x8a6a3a); hornR.position.set(0.08,2.78,-0.42); g.add(hornR);
       },
     });
   },
   lion(){
+    const hide = ANIMAL_HIDE_MAT.lion;
     return makeQuadruped({
-      bodyW:0.85, bodyH:0.55, bodyD:0.5, bodyY:0.65, bodyColor:0xc99a4e,
-      legW:0.14, legColor:0xc99a4e,
-      headW:0.32, headH:0.3, headD:0.28, headColor:0xc99a4e, headY:0.8, headZ:-0.5,
+      bodyW:0.85, bodyH:0.55, bodyD:0.5, bodyY:0.65, bodyMat:hide,
+      legW:0.14,
+      headW:0.32, headH:0.3, headD:0.28, headY:0.8, headZ:-0.5,
       extras(g){
         const mane=animalBox(0.46,0.46,0.4,0x8a5a28); mane.position.set(0,0.8,-0.44); g.add(mane);
-        const head2=animalBox(0.32,0.3,0.28,0xc99a4e); head2.position.set(0,0.8,-0.58); g.add(head2);
-        const tail=animalBox(0.06,0.06,0.4,0xc99a4e); tail.position.set(0,0.65,0.5); tail.rotation.x=0.3; g.add(tail);
+        const head2=animalBox(0.32,0.3,0.28,hide); head2.position.set(0,0.8,-0.58); g.add(head2);
+        const tail=animalBox(0.06,0.06,0.4,hide); tail.position.set(0,0.65,0.5); tail.rotation.x=0.3; g.add(tail);
         const tuft=animalBox(0.1,0.1,0.1,0x5a3a1a); tuft.position.set(0,0.5,0.68); g.add(tuft);
       },
     });
   },
   elephant(){
+    const hide = ANIMAL_HIDE_MAT.elephant;
     return makeQuadruped({
-      bodyW:1.3, bodyH:0.9, bodyD:0.7, bodyY:1.0, bodyColor:0x9a9a9a,
-      legW:0.24, legColor:0x9a9a9a,
-      headW:0.5, headH:0.5, headD:0.4, headColor:0x9a9a9a, headY:1.15, headZ:-0.65,
+      bodyW:1.3, bodyH:0.9, bodyD:0.7, bodyY:1.0, bodyMat:hide,
+      legW:0.24,
+      headW:0.5, headH:0.5, headD:0.4, headY:1.15, headZ:-0.65,
       extras(g){
-        const earL=animalBox(0.06,0.4,0.4,0x8a8a8a); earL.position.set(-0.28,1.2,-0.55); g.add(earL);
-        const earR=animalBox(0.06,0.4,0.4,0x8a8a8a); earR.position.set(0.28,1.2,-0.55); g.add(earR);
-        const trunk=animalBox(0.14,0.55,0.14,0x9a9a9a);
+        const earL=animalBox(0.06,0.4,0.4,hide); earL.position.set(-0.28,1.2,-0.55); g.add(earL);
+        const earR=animalBox(0.06,0.4,0.4,hide); earR.position.set(0.28,1.2,-0.55); g.add(earR);
+        const trunk=animalBox(0.14,0.55,0.14,hide);
         trunk.geometry.translate(0,-0.275,0); trunk.position.set(0,1.3,-0.85); trunk.rotation.x=0.2; g.add(trunk);
         const tuskL=animalBox(0.05,0.05,0.22,0xf0ead6); tuskL.position.set(-0.12,0.95,-0.9); g.add(tuskL);
         const tuskR=animalBox(0.05,0.05,0.22,0xf0ead6); tuskR.position.set(0.12,0.95,-0.9); g.add(tuskR);
@@ -759,10 +857,13 @@ function animateQuadrupedWalk(group, state, dt, moving, speedMul){
 
 // ---------- Animal AI ----------
 const animals = [];
+// Ground for animals excludes tree material (WOOD/LEAVES) so they never end up standing in a
+// tree's trunk or canopy — only natural terrain and player-built blocks count as "ground".
+function isAnimalGround(b){ return b!==AIR && b!==WATER && b!==WOOD && b!==LEAVES; }
 function groundHeightAt(x,z){
   const bx=Math.floor(x), bz=Math.floor(z);
   for(let y=WORLD_HEIGHT-1;y>=0;y--){
-    if(blockSolid(bx,y,bz)) return y+1;
+    if(isAnimalGround(getBlock(bx,y,bz))) return y+1;
   }
   return 1;
 }
@@ -779,7 +880,7 @@ function spawnAnimals(){
         z = 4 + Math.floor(hz*(WORLD_SIZE-8));
         h = heightAt(x,z);
         tries++;
-      } while((h<=SEA_LEVEL || getBlock(x,h,z)!==GRASS) && tries<30);
+      } while((h<=SEA_LEVEL || getBlock(x,h,z)!==GRASS || getBlock(x,h+1,z)!==AIR) && tries<30);
       const stats = ANIMAL_STATS[type];
       const mesh = createAnimalMesh(type);
       const gy = groundHeightAt(x+0.5, z+0.5);
@@ -860,7 +961,7 @@ function damageAnimal(a, dmg){
   const stats = ANIMAL_STATS[a.type];
   if(stats.retaliate) a.aggroUntil = performance.now() + RETALIATE_MS;
   if(fbReady) db.ref('world/mobs/'+a.id+'/hp').set(a.hp);
-  if(a.hp<=0) killAnimal(a);
+  if(a.hp<=0){ SFX.animalDeath(); killAnimal(a); }
 }
 function applyRemoteMobHp(id, hp){
   const a = animals.find(x=>x.id===id);
@@ -868,6 +969,61 @@ function applyRemoteMobHp(id, hp){
   a.hp = hp;
   if(a.hp<=0) killAnimal(a);
 }
+
+// ---------- Sound effects (synthesized with Web Audio, no audio files needed) ----------
+let audioCtx = null;
+function ensureAudio(){
+  if(!audioCtx){
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if(!Ctx) return null;
+    audioCtx = new Ctx();
+  }
+  if(audioCtx.state==='suspended') audioCtx.resume();
+  return audioCtx;
+}
+function playTone(freq, duration, type, volume, freqEnd){
+  const ctx = ensureAudio();
+  if(!ctx) return;
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = type || 'sine';
+  osc.frequency.setValueAtTime(freq, ctx.currentTime);
+  if(freqEnd) osc.frequency.exponentialRampToValueAtTime(Math.max(freqEnd,1), ctx.currentTime+duration);
+  gain.gain.setValueAtTime(volume||0.2, ctx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime+duration);
+  osc.connect(gain).connect(ctx.destination);
+  osc.start();
+  osc.stop(ctx.currentTime+duration);
+}
+function playNoise(duration, volume, filterFreq){
+  const ctx = ensureAudio();
+  if(!ctx) return;
+  const bufferSize = Math.max(1, Math.floor(ctx.sampleRate*duration));
+  const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+  const data = buffer.getChannelData(0);
+  for(let i=0;i<bufferSize;i++) data[i] = (Math.random()*2-1) * (1 - i/bufferSize);
+  const src = ctx.createBufferSource();
+  src.buffer = buffer;
+  const filter = ctx.createBiquadFilter();
+  filter.type = 'lowpass';
+  filter.frequency.value = filterFreq || 1500;
+  const gain = ctx.createGain();
+  gain.gain.value = volume || 0.3;
+  src.connect(filter).connect(gain).connect(ctx.destination);
+  src.start();
+}
+const SFX = {
+  breakBlock(){ playNoise(0.15, 0.35, 1200); },
+  placeBlock(){ playNoise(0.1, 0.25, 2200); },
+  swing(){ playTone(220, 0.08, 'triangle', 0.08, 180); },
+  hitAnimal(){ playTone(320, 0.1, 'square', 0.15, 150); },
+  animalDeath(){ playTone(220, 0.35, 'sawtooth', 0.18, 40); },
+  hurt(){ playTone(150, 0.25, 'sawtooth', 0.22, 80); },
+  jump(){ playTone(500, 0.1, 'sine', 0.1, 700); },
+  land(){ playNoise(0.08, 0.18, 700); },
+  craft(){ playTone(660, 0.09, 'sine', 0.14, 880); setTimeout(()=>playTone(880, 0.14, 'sine', 0.14, 1100), 80); },
+  death(){ playTone(300, 0.6, 'sawtooth', 0.2, 50); },
+};
 
 // ---------- Combat ----------
 let myHP = PLAYER_MAX_HP;
@@ -893,15 +1049,31 @@ function updateHeartsUI(){
     el.insertAdjacentHTML('beforeend', heartSVG(kind,i));
   }
 }
+let hurtFlashTimeout = null;
+function flashHurt(){
+  const el = document.getElementById('hurtOverlay');
+  if(!el) return;
+  el.style.transition = 'none';
+  el.style.opacity = '1';
+  clearTimeout(hurtFlashTimeout);
+  requestAnimationFrame(()=>{
+    el.style.transition = 'opacity 0.5s ease-out';
+    el.style.opacity = '0';
+  });
+}
 function damagePlayer(dmg, sourceType){
+  if(dmg<=0) return;
   myHP = Math.max(0, myHP - dmg);
   updateHeartsUI();
+  flashHurt();
+  SFX.hurt();
   if(fbReady) db.ref('players/'+myId+'/hp').set(myHP);
   if(myHP<=0) die();
 }
 function die(){
   const msg = document.getElementById('deathMessage');
   if(msg){ msg.hidden = false; setTimeout(()=>{ msg.hidden = true; }, 1500); }
+  SFX.death();
   spawnPlayer();
   myHP = PLAYER_MAX_HP;
   updateHeartsUI();
@@ -941,6 +1113,8 @@ function tryAttack(){
   if(now - lastPlayerAttack >= 350){
     lastPlayerAttack = now;
     triggerSwing();
+    SFX.swing();
+    SFX.hitAnimal();
     if(target.type==='animal') damageAnimal(target.ref, PLAYER_ATTACK_DMG);
     else damageRemotePlayer(target.id, target.ref, PLAYER_ATTACK_DMG);
   }
@@ -1165,11 +1339,14 @@ function updatePlayer(dt){
 
   const speed = (keys['ShiftLeft']||keys['ShiftRight']) ? SPRINT_SPEED : WALK_SPEED;
 
+  const wasOnGround = player.onGround;
+
   player.vel.y += GRAVITY*dt;
   if(player.vel.y < -50) player.vel.y = -50;
   if(keys['Space'] && player.onGround){
     player.vel.y = JUMP_SPEED;
     player.onGround = false;
+    SFX.jump();
   }
 
   const dx = mx*speed*dt, dz = mz*speed*dt, dy = player.vel.y*dt;
@@ -1183,6 +1360,15 @@ function updatePlayer(dt){
     if(dy<0) player.onGround = true;
     player.vel.y = 0;
   }
+
+  if(!wasOnGround && player.onGround){
+    const fallDist = player.fallFrom - player.pos.y;
+    if(fallDist > FALL_DAMAGE_FREE_BLOCKS){
+      damagePlayer(Math.round(fallDist - FALL_DAMAGE_FREE_BLOCKS), 'fall');
+    }
+    SFX.land();
+  }
+  if(player.onGround) player.fallFrom = player.pos.y;
 
   player.pos.x = Math.max(1, Math.min(WORLD_SIZE-1, player.pos.x));
   player.pos.z = Math.max(1, Math.min(WORLD_SIZE-1, player.pos.z));
@@ -1212,6 +1398,7 @@ function breakBlock(){
   if(COLLECTIBLE.has(b)){ invAdd(b,1); saveInventory(); }
   updateHotbarUI();
   triggerSwing();
+  SFX.breakBlock();
 }
 function placeBlock(){
   const hit = raycastBlock();
@@ -1229,6 +1416,7 @@ function placeBlock(){
   saveInventory();
   updateHotbarUI();
   triggerSwing();
+  SFX.placeBlock();
 }
 
 // ---------- Input ----------
@@ -1259,7 +1447,7 @@ window.addEventListener('wheel', e=>{
 
 const overlay = document.getElementById('overlay');
 let locked = false;
-overlay.addEventListener('click', ()=>{ if(!craftingOpen) document.body.requestPointerLock(); });
+overlay.addEventListener('click', ()=>{ ensureAudio(); if(!craftingOpen) document.body.requestPointerLock(); });
 document.addEventListener('pointerlockchange', ()=>{
   locked = document.pointerLockElement === document.body;
   overlay.hidden = locked || craftingOpen;
@@ -1456,6 +1644,5 @@ function animate(now){
     fpsTimer=0; fpsCount=0;
   }
 }
-
 init();
 })();

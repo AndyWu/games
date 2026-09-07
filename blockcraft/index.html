@@ -26,6 +26,7 @@
   #hud{position:fixed;top:10px;left:10px;color:#fff;font-size:12px;text-shadow:0 0 3px #000;z-index:10;line-height:1.5;background:rgba(0,0,0,0.25);padding:6px 10px;border-radius:6px;}
   #hearts{position:fixed;top:10px;left:50%;transform:translateX(-50%);display:flex;gap:2px;z-index:10;filter:drop-shadow(0 0 2px rgba(0,0,0,0.7));}
   #deathMessage{position:fixed;top:35%;left:50%;transform:translate(-50%,-50%);color:#e05a4a;font-size:2em;font-weight:700;text-shadow:0 0 8px rgba(0,0,0,0.8);z-index:15;pointer-events:none;}
+  #hurtOverlay{position:fixed;inset:0;z-index:14;pointer-events:none;opacity:0;background:radial-gradient(ellipse at center, rgba(180,0,0,0) 35%, rgba(180,0,0,0.55) 100%);}
   #hint{position:fixed;bottom:80px;left:50%;transform:translateX(-50%);color:#fff;font-size:12px;text-shadow:0 0 3px #000;z-index:10;opacity:0.85;white-space:nowrap;}
   #craftHint{position:fixed;bottom:80px;left:50%;transform:translateX(-50%);color:#fff;font-size:13px;font-weight:600;text-shadow:0 0 4px #000;z-index:11;opacity:0;transition:opacity 0.15s;pointer-events:none;background:rgba(0,0,0,0.4);padding:6px 12px;border-radius:6px;}
   #craftHint.show{opacity:1;}
@@ -54,6 +55,7 @@
 <div id="hud">Blocks edited: <span id="blockCount">0</span> &nbsp;|&nbsp; FPS: <span id="fps">0</span> &nbsp;|&nbsp; Players: <span id="playerCount">1</span> &nbsp;|&nbsp; <span id="mpStatus">Connecting…</span></div>
 <div id="hearts"></div>
 <div id="deathMessage" hidden>You died</div>
+<div id="hurtOverlay"></div>
 <div id="crosshair"></div>
 <div id="hotbar"></div>
 <div id="hint">Left click: break / attack &nbsp;·&nbsp; Right click: place &nbsp;·&nbsp; 1-0 / scroll: select block &nbsp;·&nbsp; E: craft &nbsp;·&nbsp; V: 3rd person &nbsp;·&nbsp; Esc: release mouse</div>
