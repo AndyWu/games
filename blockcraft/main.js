@@ -962,9 +962,11 @@ function rebuildChunk(cx,cz){
   }
   const { solid, water, glass } = buildChunkGeometries(cx,cz);
   const entry = {};
-  if(solid){ const m = new THREE.Mesh(solid, solidMaterial); scene.add(m); entry.solid = m; }
-  if(water){ const m = new THREE.Mesh(water, waterMaterial); scene.add(m); entry.water = m; }
-  if(glass){ const m = new THREE.Mesh(glass, glassMaterial); scene.add(m); entry.glass = m; }
+  // Only the solid terrain casts/receives shadows — water/glass stay out of it, both because
+  // translucent shadow casters look wrong and because it keeps the shadow pass cheaper.
+  if(solid){ const m = new THREE.Mesh(solid, solidMaterial); m.castShadow = true; m.receiveShadow = true; scene.add(m); entry.solid = m; }
+  if(water){ const m = new THREE.Mesh(water, waterMaterial); m.receiveShadow = true; scene.add(m); entry.water = m; }
+  if(glass){ const m = new THREE.Mesh(glass, glassMaterial); m.receiveShadow = true; scene.add(m); entry.glass = m; }
   chunkMeshes.set(key, entry);
 }
 function rebuildAllChunks(){
@@ -1150,6 +1152,7 @@ function createCharacterMesh(shirtColor){
 
   group.add(head, body, armL, armR, legL, legR);
   group.userData.parts = { armL, armR, legL, legR };
+  group.traverse(o => { if(o.isMesh){ o.castShadow = true; } });
   return group;
 }
 function animateWalk(group, state, dt, moving, sprinting){
@@ -1420,6 +1423,7 @@ for(const type of ANIMAL_TYPES) ANIMAL_SCALE[type] = ANIMAL_REAL_HEIGHT[type] / 
 function createAnimalMesh(type){
   const mesh = ANIMAL_BUILDERS[type]();
   mesh.scale.setScalar(ANIMAL_SCALE[type]);
+  mesh.traverse(o => { if(o.isMesh){ o.castShadow = true; } });
   return mesh;
 }
 function animateQuadrupedWalk(group, state, dt, moving, speedMul){
@@ -2151,6 +2155,127 @@ function currentCalendarDate(){
   return { year, month: MONTH_NAMES[monthIdx], day };
 }
 
+// ---------- Sun, moon & shadows ----------
+// Both bodies are billboard sprites riding the same day-time angle the lighting already uses, at a
+// large fixed radius so they read as distant sky objects. The DirectionalLight's actual position
+// (used for both lighting direction and its shadow camera) is kept at that same angle/height but
+// re-centered on the PLAYER every frame — shadows only need to be correct near you, and a shadow
+// camera that follows you can use a small, sharp frustum instead of trying to cover the whole world.
+const SUN_ORBIT_R = 150;
+const SHADOW_RADIUS = 32;
+const SYNODIC_MONTH_DAYS = 29.530588; // real lunar month length
+let sunSprite, moonSprite, moonBaseCanvas, moonBaseImageData, moonPhaseCanvas;
+let lastMoonPhaseKey = null;
+function buildGlowSpriteTexture(stops){
+  const S = 64;
+  const canvas = document.createElement('canvas');
+  canvas.width=S; canvas.height=S;
+  const ctx = canvas.getContext('2d');
+  const grad = ctx.createRadialGradient(S/2,S/2,0, S/2,S/2,S/2);
+  stops.forEach(([off,color])=> grad.addColorStop(off,color));
+  ctx.fillStyle = grad;
+  ctx.fillRect(0,0,S,S);
+  return new THREE.CanvasTexture(canvas);
+}
+function buildMoonBaseCanvas(){
+  const S = 64;
+  const canvas = document.createElement('canvas');
+  canvas.width=S; canvas.height=S;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#d8d4c8';
+  ctx.beginPath(); ctx.arc(S/2,S/2,S/2-1,0,Math.PI*2); ctx.fill();
+  for(let i=0;i<8;i++){
+    const cx=S*0.2+Math.random()*S*0.6, cy=S*0.2+Math.random()*S*0.6;
+    const r=S*(0.04+Math.random()*0.07);
+    if(Math.hypot(cx-S/2,cy-S/2)>S/2-r) continue;
+    ctx.fillStyle='rgba(140,138,125,0.5)';
+    ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.fill();
+  }
+  return canvas;
+}
+// Per-pixel sphere-lighting test (not canvas path arcs — much easier to get exactly right): a point
+// on the visible hemisphere is lit if it faces the phase's implied light direction. theta=0 -> new
+// moon (light from directly behind, as seen by us), theta=PI -> full (light from directly in front).
+function buildMoonPhaseCanvas(phase01){
+  const S = moonBaseCanvas.width;
+  const canvas = document.createElement('canvas');
+  canvas.width=S; canvas.height=S;
+  const ctx = canvas.getContext('2d');
+  const out = ctx.createImageData(S,S);
+  const theta = phase01*Math.PI*2;
+  const sinT = Math.sin(theta), cosT = Math.cos(theta);
+  const cx=S/2, cy=S/2, r=S/2-1;
+  const base = moonBaseImageData.data;
+  for(let y=0;y<S;y++){
+    for(let x=0;x<S;x++){
+      const i=(y*S+x)*4;
+      const nx=(x-cx)/r, ny=(y-cy)/r;
+      const d2=nx*nx+ny*ny;
+      if(d2>1){ out.data[i+3]=0; continue; }
+      const nz = Math.sqrt(1-d2);
+      const lit = (nx*sinT - nz*cosT) > 0;
+      let br=base[i], bg=base[i+1], bb=base[i+2];
+      if(!lit){ br*=0.12; bg*=0.12; bb*=0.18; }
+      out.data[i]=br; out.data[i+1]=bg; out.data[i+2]=bb; out.data[i+3]=base[i+3];
+    }
+  }
+  ctx.putImageData(out,0,0);
+  return canvas;
+}
+function currentMoonPhase(){
+  // 0 = new, 0.5 = full, cyclical. CALENDAR_EPOCH_MS is anchored to a full moon (see the calendar
+  // section above), so phase = 0.5 exactly at that instant, moving in real elapsed days regardless
+  // of the game's own compressed day/night or calendar speed.
+  const elapsedDays = (Date.now() - CALENDAR_EPOCH_MS) / 86400000;
+  let f = (0.5 + elapsedDays / SYNODIC_MONTH_DAYS) % 1;
+  if(f < 0) f += 1;
+  return f;
+}
+function buildCelestialBodies(){
+  const sunTex = buildGlowSpriteTexture([[0,'rgba(255,255,230,1)'],[0.5,'rgba(255,235,150,0.95)'],[1,'rgba(255,200,80,0)']]);
+  sunSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map:sunTex, transparent:true, depthWrite:false, depthTest:false }));
+  sunSprite.scale.set(28,28,1);
+  sunSprite.renderOrder = -1;
+  scene.add(sunSprite);
+
+  moonBaseCanvas = buildMoonBaseCanvas();
+  moonBaseImageData = moonBaseCanvas.getContext('2d').getImageData(0,0,moonBaseCanvas.width,moonBaseCanvas.height);
+  const moonMat = new THREE.SpriteMaterial({ transparent:true, depthWrite:false, depthTest:false });
+  moonSprite = new THREE.Sprite(moonMat);
+  moonSprite.scale.set(20,20,1);
+  moonSprite.renderOrder = -1;
+  scene.add(moonSprite);
+}
+function updateCelestialBodies(dayTime){
+  const theta = dayTime*Math.PI*2;
+  const sunHeight = Math.sin(theta - Math.PI/2); // unclamped: true rise/set through the horizon
+  const cx = Math.cos(theta), sz = Math.sin(theta);
+  sunSprite.position.set(player.pos.x+cx*SUN_ORBIT_R, player.pos.y+sunHeight*SUN_ORBIT_R*0.6+20, player.pos.z+sz*SUN_ORBIT_R);
+  sunSprite.visible = sunHeight > -0.06;
+
+  // The moon sits opposite the sun (rises as the sun sets) and its own arc uses the same sunHeight
+  // shape mirrored, so it's up for the night half of the cycle and below the horizon during the day.
+  const moonHeight = -sunHeight;
+  moonSprite.position.set(player.pos.x-cx*SUN_ORBIT_R, player.pos.y+moonHeight*SUN_ORBIT_R*0.6+20, player.pos.z-sz*SUN_ORBIT_R);
+  moonSprite.visible = moonHeight > -0.06;
+
+  const phase = currentMoonPhase();
+  const phaseKey = Math.round(phase*100); // real lunar month is ~29.5 days — no need to redraw often
+  if(phaseKey !== lastMoonPhaseKey){
+    lastMoonPhaseKey = phaseKey;
+    if(moonSprite.material.map) moonSprite.material.map.dispose();
+    moonPhaseCanvas = buildMoonPhaseCanvas(phase);
+    const tex = new THREE.CanvasTexture(moonPhaseCanvas);
+    moonSprite.material.map = tex;
+    moonSprite.material.needsUpdate = true;
+  }
+
+  // Keep the sun (and its shadow) at the same angle/height, but centered on the player instead of
+  // the world origin, so the shadow camera's small frustum always covers the ground right around you.
+  sunLight.position.set(player.pos.x+cx*SUN_ORBIT_R, Math.max(5, sunHeight*SUN_ORBIT_R*0.6+40), player.pos.z+sz*SUN_ORBIT_R);
+  sunLight.target.position.set(player.pos.x, player.pos.y, player.pos.z);
+}
+
 let lastWorldTimeLabel = null, lastDateLabel = null;
 function updateDayNight(){
   const dayTime = currentDayTime();
@@ -2180,10 +2305,7 @@ function updateDayNight(){
   hemiLight.intensity = k0.hemi + (k1.hemi-k0.hemi)*lt;
   sunLight.intensity = k0.sunI + (k1.sunI-k0.sunI)*lt;
   sunLight.color.setHex(lerpColorHex(k0.sunC, k1.sunC, lt));
-  const theta = dayTime*Math.PI*2;
-  const sunHeight = Math.sin(theta - Math.PI/2);
-  const R = 150;
-  sunLight.position.set(Math.cos(theta)*R, Math.max(5, sunHeight*R*0.6+40), Math.sin(theta)*R);
+  updateCelestialBodies(dayTime);
 }
 
 // ---------- Weather ----------
@@ -3940,13 +4062,27 @@ function init(){
   renderer = new THREE.WebGLRenderer({ antialias:true });
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   document.body.appendChild(renderer.domElement);
 
   hemiLight = new THREE.HemisphereLight(0xffffff, 0x445533, 0.9);
   scene.add(hemiLight);
   sunLight = new THREE.DirectionalLight(0xffffff, 0.8);
   sunLight.position.set(80,120,40);
+  sunLight.castShadow = true;
+  sunLight.shadow.mapSize.set(1536,1536);
+  // The shadow camera is a small box that follows the player (see updateDayNight) rather than
+  // trying to cover the whole 128x128 world at once — keeps shadow resolution usable regardless of
+  // how big the world is. SHADOW_RADIUS/far need to stay in sync with the light's own orbit radius.
+  const sc = sunLight.shadow.camera;
+  sc.left = -SHADOW_RADIUS; sc.right = SHADOW_RADIUS;
+  sc.top = SHADOW_RADIUS; sc.bottom = -SHADOW_RADIUS;
+  sc.near = 1; sc.far = SUN_ORBIT_R*2.2;
+  sunLight.shadow.bias = -0.0015;
   scene.add(sunLight);
+  scene.add(sunLight.target);
+  buildCelestialBodies();
 
   characterMesh = createCharacterMesh();
   characterMesh.visible = false;
