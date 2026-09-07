@@ -1670,8 +1670,8 @@ function updateDayNight(){
 // ---------- Weather ----------
 // Like the day/night cycle, weather is derived straight from the wall clock — no syncing needed,
 // everyone in the shared world sees the same weather at the same time automatically.
-const WEATHER_PERIOD_S = 480;      // how long one weather episode lasts (8 min)
-const WEATHER_TRANSITION_S = 25;   // how long it takes to blend into a freshly-rolled episode
+const WEATHER_PERIOD_S = 1200;     // how long one weather episode lasts (20 min)
+const WEATHER_TRANSITION_S = 90;   // how long it takes to blend into a freshly-rolled episode (1.5 min)
 const WEATHER_TYPES = [
   // cumulative selection order matters only in that it's applied consistently; percentages per the spec
   { id:'sunny',        p:0.50, fogMul:1.00, darken:0.00, rain:0.0,  thunder:false, label:'Sunny' },
