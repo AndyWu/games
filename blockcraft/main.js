@@ -2428,6 +2428,96 @@ function updateFireflies(dt){
   }
 }
 
+// ---------- Worms: slowly eat tree leaves, breed, and can be burned to death ----------
+// A single worm spawns on the world's trees at load. Every 2 real hours it eats the nearest leaf
+// block within reach (a genuine world edit — synced/persisted like any other block change, so
+// everyone sees the same tree thin out); every 24 real hours it has 2 children nearby. Population is
+// capped so an unattended world can't grow it forever. Standing in an active fire cell kills it
+// instantly, same "you're in the fire" test the fire-damage tick already uses for animals/players.
+// The worm creature itself (unlike the leaves it eats) is a local decorative simulation, not synced
+// across clients — the same tradeoff already made for fireflies.
+const WORM_EAT_INTERVAL_MS = 2*3600*1000;       // one leaf block every 2 real hours
+const WORM_REPRODUCE_INTERVAL_MS = 24*3600*1000; // 2 children every 24 real hours
+const WORM_CHILDREN_PER_REPRODUCE = 2;
+const WORM_MAX_POPULATION = 24;
+const WORM_SEARCH_RADIUS = 6;
+const worms = [];
+let wormGeo, wormMat;
+function findNearestLeaf(cx,cy,cz,radius){
+  let best=null, bestD2=Infinity;
+  const r = Math.ceil(radius), r2 = radius*radius;
+  const bx=Math.floor(cx), by=Math.floor(cy), bz=Math.floor(cz);
+  for(let dx=-r;dx<=r;dx++) for(let dy=-r;dy<=r;dy++) for(let dz=-r;dz<=r;dz++){
+    const d2 = dx*dx+dy*dy+dz*dz;
+    if(d2>r2 || d2>=bestD2) continue;
+    const x=bx+dx, y=by+dy, z=bz+dz;
+    if(getBlock(x,y,z)===LEAVES){ best={x,y,z}; bestD2=d2; }
+  }
+  return best;
+}
+function findInitialWormSpot(){
+  for(let tries=0; tries<200; tries++){
+    const x = 4+Math.floor(Math.random()*(WORLD_SIZE-8));
+    const z = 4+Math.floor(Math.random()*(WORLD_SIZE-8));
+    const h = heightAt(x,z);
+    for(let y=h; y<h+10 && y<WORLD_HEIGHT; y++){
+      if(getBlock(x,y,z)===LEAVES) return {x,y,z};
+    }
+  }
+  return null;
+}
+function spawnWorm(x,y,z,bornAt){
+  if(worms.length>=WORM_MAX_POPULATION) return null;
+  if(!wormGeo){
+    wormGeo = new THREE.SphereGeometry(0.16,6,6);
+    wormMat = new THREE.MeshLambertMaterial({ color: 0xc98a6b });
+  }
+  const mesh = new THREE.Mesh(wormGeo, wormMat);
+  mesh.scale.set(1, 0.55, 2.4);
+  mesh.position.set(x+0.5, y+0.25, z+0.5);
+  scene.add(mesh);
+  const w = {
+    mesh, x:x+0.5, y:y+0.25, z:z+0.5,
+    lastAteAt: bornAt, lastReproducedAt: bornAt, phase: Math.random()*Math.PI*2,
+  };
+  worms.push(w);
+  return w;
+}
+function killWorm(w){
+  scene.remove(w.mesh);
+  const i = worms.indexOf(w);
+  if(i>=0) worms.splice(i,1);
+}
+function updateWorms(dt){
+  const now = Date.now();
+  const t = performance.now()/1000;
+  for(const w of Array.from(worms)){
+    let burned = false;
+    for(const key of fires.keys()){
+      const [fx,fy,fz] = key.split(',').map(Number);
+      if(Math.floor(w.x)===fx && Math.floor(w.y)===fy && Math.floor(w.z)===fz){ burned = true; break; }
+    }
+    if(burned){ killWorm(w); continue; }
+
+    if(now - w.lastAteAt >= WORM_EAT_INTERVAL_MS){
+      w.lastAteAt = now;
+      const leaf = findNearestLeaf(w.x, w.y, w.z, WORM_SEARCH_RADIUS);
+      if(leaf){
+        applyWorldEdit(leaf.x, leaf.y, leaf.z, AIR, false);
+        w.x = leaf.x+0.5; w.y = leaf.y+0.25; w.z = leaf.z+0.5;
+      }
+    }
+    if(now - w.lastReproducedAt >= WORM_REPRODUCE_INTERVAL_MS){
+      w.lastReproducedAt = now;
+      for(let i=0;i<WORM_CHILDREN_PER_REPRODUCE;i++){
+        spawnWorm(Math.floor(w.x)+(Math.random()<0.5?-1:1), Math.floor(w.y), Math.floor(w.z)+(Math.random()<0.5?-1:1), now);
+      }
+    }
+    w.mesh.position.set(w.x, w.y + Math.sin(t*1.5+w.phase)*0.04, w.z);
+    w.mesh.rotation.y = Math.sin(t*0.3+w.phase)*0.6;
+  }
+}
+
 // ---------- Saplings: little trees that randomly appear on grass and slowly grow into full trees ----------
 const SAPLING_MAX_STAGE = 3;          // height in blocks while still growing, before it becomes a real tree
 const SAPLING_STAGE_MS = 400000;      // real time between each extra block of height (10x slower)
@@ -3594,6 +3684,7 @@ function init(){
   rebuildAllChunks();
   spawnPlayer();
   spawnAnimals();
+  { const spot = findInitialWormSpot(); if(spot) spawnWorm(spot.x, spot.y, spot.z, Date.now()); }
   updateHotbarUI();
   updateHeldItemColor();
   updateHeartsUI();
@@ -3632,6 +3723,7 @@ function animate(now){
   updateFires(dt);
   updateFireworks(dt);
   updateFireflies(dt);
+  updateWorms(dt);
   heldTorchLight.visible = HOTBAR[selectedSlot]===TORCH;
   if(heldTorchLight.visible) heldTorchLight.intensity = 1.0 + Math.random()*0.3;
   updateDayNight();
