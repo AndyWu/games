@@ -8,7 +8,7 @@ const WORLD_SIZE = 128;     // x/z extent (4x the original 64x64 area, same gene
 const WORLD_HEIGHT = 48;    // y extent
 const CHUNK_SIZE = 16;
 const CHUNKS_PER_SIDE = WORLD_SIZE / CHUNK_SIZE;
-const SEA_LEVEL = 16; // flooded 1 block higher than the original 15
+const SEA_LEVEL = 17; // flooded 1 block higher again (originally 15)
 const BASE_HEIGHT = 20;
 const AMPLITUDE = 9;
 const SEED = 1337;
@@ -2689,7 +2689,7 @@ function updateFireflies(dt){
 const WORM_EAT_INTERVAL_MS = 2*3600*1000;       // one leaf block every 2 real hours
 const WORM_REPRODUCE_INTERVAL_MS = 24*3600*1000; // 2 children every 24 real hours
 const WORM_CHILDREN_PER_REPRODUCE = 2;
-const WORM_MAX_POPULATION = 24;
+const WORM_MAX_POPULATION = 100;
 const WORM_SEARCH_RADIUS = 6;
 const worms = [];
 let wormGeo, wormMat;
@@ -4188,6 +4188,7 @@ function animate(now){
   if(fpsTimer>=0.5){
     document.getElementById('fps').textContent = Math.round(fpsCount/fpsTimer);
     fpsTimer=0; fpsCount=0;
+    document.getElementById('wormCount').textContent = worms.length;
   }
 }
 init();
