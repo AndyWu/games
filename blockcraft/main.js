@@ -1178,9 +1178,7 @@ function animateWalk(group, state, dt, moving, sprinting){
   legR.rotation.x = -swing;
 }
 function colorForId(id){
-  let h=0;
-  for(let i=0;i<id.length;i++) h = (h*31 + id.charCodeAt(i)) >>> 0;
-  return new THREE.Color(`hsl(${h%360},60%,55%)`).getHex();
+  return new THREE.Color(`hsl(${hashIdToSeed(id)%360},60%,55%)`).getHex();
 }
 
 // ---------- Floating name/HP tag (drawn on a canvas, shown as a billboard sprite above the head) ----------
@@ -2694,7 +2692,7 @@ function updateFireflies(dt){
   }
 }
 
-// ---------- Worms: slowly eat tree leaves, breed, and can be burned to death ----------
+// ---------- Worms: slowly eat tree leaves, breed, turn into butterflies, and can be burned to death ----------
 // A single worm spawns on the world's trees the first time anyone loads a world. Every 2 in-game
 // hours (Blockcraft's clock, not the wall clock — DAY_LENGTH_S real seconds is a full 24-hour
 // in-game day, so this works out to DAY_LENGTH_S/12 real seconds) each worm eats the nearest leaf
@@ -2702,21 +2700,24 @@ function updateFireflies(dt){
 // everyone sees the same tree thin out); every 1 in-game hour (DAY_LENGTH_S/24 real seconds) it has
 // 2 children nearby. Population is capped so an unattended world can't grow it forever. Standing in
 // an active fire cell kills it instantly, same "you're in the fire" test the fire-damage tick
-// already uses for animals/players.
+// already uses for animals/players. Once a worm has personally eaten WORM_BUTTERFLY_THRESHOLD leaves
+// over its lifetime, it metamorphoses into a butterfly right where it's standing (see the Butterflies
+// section below) instead of continuing to eat/reproduce as a worm.
 // Unlike fireflies/the ghost, worms themselves ARE synced — under 'world/worms/<id>' — precisely so
 // their eat/reproduce timers survive a reload: without persistence every page load reset every timer
 // to "now", so a single continuously-open tab was the only way either interval could ever actually
-// fire. Each worm's existence, position, and both timestamps live in Firebase (with the timestamp
-// fields written as firebase.database.ServerValue.TIMESTAMP so clocks don't need to agree); every
-// connected client mirrors the same set of worms and independently runs the eat/reproduce checks
-// against those shared timestamps, same client-authoritative, no-transactions approach already used
-// for block edits/saplings/fires elsewhere in this file. In solo/offline play (no Firebase), worms
-// fall back to the old purely-local, resets-on-reload behavior.
+// fire. Each worm's existence, position, both timestamps, and its running eaten-leaves count live in
+// Firebase (with the timestamp fields written as firebase.database.ServerValue.TIMESTAMP so clocks
+// don't need to agree); every connected client mirrors the same set of worms and independently runs
+// the eat/reproduce checks against those shared timestamps, same client-authoritative, no-transactions
+// approach already used for block edits/saplings/fires elsewhere in this file. In solo/offline play
+// (no Firebase), worms fall back to the old purely-local, resets-on-reload behavior.
 const WORM_EAT_INTERVAL_MS = DAY_LENGTH_S*1000 * (2/24); // one leaf block every 2 in-game hours
 const WORM_REPRODUCE_INTERVAL_MS = DAY_LENGTH_S*1000 * (1/24); // 2 children every 1 in-game hour
 const WORM_CHILDREN_PER_REPRODUCE = 2;
 const WORM_MAX_POPULATION = 100;
 const WORM_SEARCH_RADIUS = 6;
+const WORM_BUTTERFLY_THRESHOLD = 100; // leaves eaten (lifetime) before a worm becomes a butterfly
 const worms = [];
 let wormGeo, wormMat;
 function findNearestLeaf(cx,cy,cz,radius){
@@ -2744,7 +2745,7 @@ function findInitialWormSpot(){
 }
 // Adds a worm to the local scene/array only — does not touch Firebase. Used both for genuinely new
 // worms (via createWorm, below) and to materialize a worm mirrored in from a remote 'child_added'.
-function spawnWorm(id,x,y,z,lastAteAt,lastReproducedAt){
+function spawnWorm(id,x,y,z,lastAteAt,lastReproducedAt,eatenCount){
   if(worms.length>=WORM_MAX_POPULATION || worms.some(w=>w.id===id)) return null;
   if(!wormGeo){
     wormGeo = new THREE.SphereGeometry(0.16,6,6);
@@ -2756,7 +2757,7 @@ function spawnWorm(id,x,y,z,lastAteAt,lastReproducedAt){
   scene.add(mesh);
   const w = {
     id, mesh, x:x+0.5, y:y+0.25, z:z+0.5,
-    lastAteAt, lastReproducedAt, phase: Math.random()*Math.PI*2,
+    lastAteAt, lastReproducedAt, eatenCount: eatenCount||0, phase: Math.random()*Math.PI*2,
   };
   worms.push(w);
   return w;
@@ -2767,10 +2768,10 @@ function createWorm(x,y,z){
   if(worms.length>=WORM_MAX_POPULATION) return null;
   const now = Date.now();
   const id = fbReady ? db.ref('world/worms').push().key : ('local_'+Math.random().toString(36).slice(2,10));
-  const w = spawnWorm(id,x,y,z,now,now);
+  const w = spawnWorm(id,x,y,z,now,now,0);
   if(w && fbReady){
     db.ref('world/worms/'+id).set({
-      x, y, z,
+      x, y, z, eatenCount: 0,
       lastAteAt: firebase.database.ServerValue.TIMESTAMP,
       lastReproducedAt: firebase.database.ServerValue.TIMESTAMP,
     });
@@ -2797,13 +2798,22 @@ function updateWorms(dt){
     if(now - w.lastAteAt >= WORM_EAT_INTERVAL_MS){
       w.lastAteAt = now;
       const leaf = findNearestLeaf(w.x, w.y, w.z, WORM_SEARCH_RADIUS);
-      const update = { lastAteAt: firebase.database.ServerValue.TIMESTAMP };
       if(leaf){
         applyWorldEdit(leaf.x, leaf.y, leaf.z, AIR, false);
         w.x = leaf.x+0.5; w.y = leaf.y+0.25; w.z = leaf.z+0.5;
-        update.x = leaf.x; update.y = leaf.y; update.z = leaf.z;
+        w.eatenCount++;
       }
-      if(fbReady) db.ref('world/worms/'+w.id).update(update);
+      if(fbReady){
+        const update = { lastAteAt: firebase.database.ServerValue.TIMESTAMP };
+        if(leaf){ update.x = leaf.x; update.y = leaf.y; update.z = leaf.z; update.eatenCount = w.eatenCount; }
+        db.ref('world/worms/'+w.id).update(update);
+      }
+      if(w.eatenCount>=WORM_BUTTERFLY_THRESHOLD){
+        const bx=Math.floor(w.x), by=Math.floor(w.y), bz=Math.floor(w.z);
+        killWorm(w);
+        createButterfly(bx,by,bz);
+        continue;
+      }
     }
     if(now - w.lastReproducedAt >= WORM_REPRODUCE_INTERVAL_MS){
       w.lastReproducedAt = now;
@@ -2816,6 +2826,148 @@ function updateWorms(dt){
     }
     w.mesh.position.set(w.x, w.y + Math.sin(t*1.5+w.phase)*0.04, w.z);
     w.mesh.rotation.y = Math.sin(t*0.3+w.phase)*0.6;
+  }
+}
+
+// ---------- Butterflies: a worm's final form ----------
+// Once a worm has eaten WORM_BUTTERFLY_THRESHOLD leaves it stops being a worm and becomes a butterfly
+// right where it stood — colorful, and free to roam. A butterfly's flight path is never synced frame
+// by frame (that would be a firehose of writes for something purely decorative-looking); instead its
+// position is a pure function of its id-derived seed and elapsed time since birth, so every connected
+// client computes the exact same path independently with zero ongoing network traffic — the same
+// wall-clock-derived trick already used throughout this file for the sun/moon, weather, and tree
+// species. Only its existence, origin point, and birth time are ever written to Firebase, under
+// 'world/butterflies/<id>'; a butterfly's own color and flight parameters are re-derived from its id
+// on every client rather than stored. It roams broadly across the whole map (a slow, large-radius
+// drift with a faster flutter layered on top) but stays within BUTTERFLY_WATER_RANGE blocks of
+// SEA_LEVEL vertically, and dies of old age after BUTTERFLY_LIFESPAN_MS. In solo/offline play (no
+// Firebase) it's still tracked locally, just not persisted, same as an offline worm.
+const BUTTERFLY_LIFESPAN_MS = DAY_LENGTH_S*1000 * 30; // 30 in-game days
+const BUTTERFLY_WATER_RANGE = 15; // stays within this many blocks of sea level, vertically
+const butterflies = [];
+function hashIdToSeed(id){
+  let h=0;
+  for(let i=0;i<id.length;i++) h = (h*31 + id.charCodeAt(i)) >>> 0;
+  return h;
+}
+// Per-pixel, not canvas arcs (the ghost's tail taught that lesson) — a symmetric two-lobe-per-side
+// silhouette (a bigger upper wing, a smaller lower wing) with a dark body line down the middle, plus
+// scattered dark "vein" speckles and lighter accent-hue spots so each butterfly reads as genuinely
+// colorful rather than a single flat tint.
+function buildButterflyTexture(seed){
+  const W=40, H=28;
+  const canvas = document.createElement('canvas');
+  canvas.width=W; canvas.height=H;
+  const ctx = canvas.getContext('2d');
+  const hue = Math.floor(hash2(seed,21)*360);
+  const accentHue = (hue + 30 + Math.floor(hash2(seed,22)*90)) % 360;
+  const cx = W/2;
+  for(let y=0;y<H;y++){
+    for(let x=0;x<W;x++){
+      const side = Math.abs(x-cx);
+      if(side<1.2 && y>1 && y<H-2){
+        ctx.fillStyle = '#241a14';
+        ctx.fillRect(x,y,1,1);
+        continue;
+      }
+      const ux=(side-9)/9, uy=(y-9)/7.5;
+      const inUpper = side>1.5 && side<19 && y>1 && y<17 && ux*ux+uy*uy<1;
+      const lx=(side-6)/6.5, ly=(y-20)/6.5;
+      const inLower = side>1.5 && side<13 && y>=15 && y<H-1 && lx*lx+ly*ly<1;
+      if(!inUpper && !inLower) continue;
+      const n = hash2(x*3.1+seed*0.7, y*4.3+seed*1.3);
+      const dark = n<0.12;
+      const spot = !dark && n>0.82;
+      const h = spot?accentHue:hue;
+      const light = dark?22:(spot?68:(inUpper?58:48));
+      const sat = dark?35:82;
+      ctx.fillStyle = `hsl(${h},${sat}%,${light}%)`;
+      ctx.fillRect(x,y,1,1);
+    }
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.magFilter = THREE.NearestFilter;
+  tex.minFilter = THREE.NearestFilter;
+  tex.generateMipmaps = false;
+  return tex;
+}
+// The x/z wander offset from wherever the butterfly was born, at a given elapsed time — split out so
+// butterflyPositionAt can subtract its own t=0 value and guarantee the flight path actually starts at
+// the origin point (see below) instead of teleporting to wherever a phase-shifted curve happens to be.
+function butterflyWanderOffset(seed, elapsedS){
+  const driftPeriodX = 30000 + hash2(seed,1)*30000, driftPeriodZ = 30000 + hash2(seed,2)*30000;
+  const driftPhaseX = hash2(seed,3)*Math.PI*2, driftPhaseZ = hash2(seed,4)*Math.PI*2;
+  const driftR = WORLD_SIZE*0.38;
+  const flutterPeriod = 18 + hash2(seed,5)*22, flutterPhase = hash2(seed,6)*Math.PI*2;
+  const flutterR = 5 + hash2(seed,7)*6;
+  const dx = Math.sin(elapsedS/driftPeriodX*Math.PI*2 + driftPhaseX)*driftR
+    + Math.sin(elapsedS/flutterPeriod*Math.PI*2 + flutterPhase)*flutterR;
+  const dz = Math.sin(elapsedS/driftPeriodZ*Math.PI*2 + driftPhaseZ)*driftR
+    + Math.cos(elapsedS/flutterPeriod*Math.PI*2*1.3 + flutterPhase)*flutterR;
+  return {dx,dz};
+}
+// A pure function of (seed, birth point, elapsed seconds since birth) — every client computes the
+// identical flight position with no network traffic. A slow Lissajous "drift" plus a faster, smaller
+// "flutter" carries it away from its birth point and across most of the map over its lifetime, always
+// starting exactly at (originX, originZ) at elapsedS=0 rather than jumping there from wherever the
+// underlying curve happens to be; height is an independent sine wave clamped to stay within
+// BUTTERFLY_WATER_RANGE of SEA_LEVEL (not anchored to the origin — it settles into that band right
+// away even if the worm turned into it high up in a tall tree).
+function butterflyPositionAt(seed, originX, originZ, elapsedS){
+  const at0 = butterflyWanderOffset(seed, 0);
+  const atT = butterflyWanderOffset(seed, elapsedS);
+  const x = Math.max(1, Math.min(WORLD_SIZE-1, originX + (atT.dx-at0.dx)));
+  const z = Math.max(1, Math.min(WORLD_SIZE-1, originZ + (atT.dz-at0.dz)));
+
+  const yPeriod = 12 + hash2(seed,8)*18, yPhase = hash2(seed,9)*Math.PI*2;
+  const y = Math.max(1, Math.min(WORLD_HEIGHT-1, SEA_LEVEL + Math.sin(elapsedS/yPeriod*Math.PI*2 + yPhase)*BUTTERFLY_WATER_RANGE));
+  return {x,y,z};
+}
+// Adds a butterfly to the local scene/array only — does not touch Firebase. Used both for genuinely
+// new butterflies (via createButterfly, below) and to materialize one mirrored in from a remote
+// 'child_added'.
+function spawnButterfly(id,x,y,z,bornAt){
+  if(butterflies.some(b=>b.id===id)) return null;
+  const seed = hashIdToSeed(id);
+  const tex = buildButterflyTexture(seed);
+  const mat = new THREE.SpriteMaterial({ map:tex, transparent:true, alphaTest:0.3 });
+  const sprite = new THREE.Sprite(mat);
+  sprite.scale.set(0.9,0.63,1);
+  const p = butterflyPositionAt(seed, x, z, Math.max(0,(Date.now()-bornAt)/1000));
+  sprite.position.set(p.x,p.y,p.z);
+  scene.add(sprite);
+  const b = { id, mesh:sprite, seed, bornAt, originX:x, originZ:z };
+  butterflies.push(b);
+  return b;
+}
+// Spawns a brand-new butterfly (a worm's metamorphosis): adds it locally AND, when online, writes it
+// to Firebase so every other client picks it up via the 'child_added' listener in initMultiplayer.
+function createButterfly(x,y,z){
+  const now = Date.now();
+  const id = fbReady ? db.ref('world/butterflies').push().key : ('local_'+Math.random().toString(36).slice(2,10));
+  const b = spawnButterfly(id,x,y,z,now);
+  if(b && fbReady){
+    db.ref('world/butterflies/'+id).set({ x, y, z, bornAt: firebase.database.ServerValue.TIMESTAMP });
+  }
+  return b;
+}
+function killButterfly(b, fromRemote){
+  scene.remove(b.mesh);
+  b.mesh.material.map.dispose();
+  b.mesh.material.dispose();
+  const i = butterflies.indexOf(b);
+  if(i>=0) butterflies.splice(i,1);
+  if(!fromRemote && fbReady) db.ref('world/butterflies/'+b.id).remove();
+}
+function updateButterflies(dt){
+  const now = Date.now();
+  const t = performance.now()/1000;
+  for(const b of Array.from(butterflies)){
+    if(now-b.bornAt>=BUTTERFLY_LIFESPAN_MS){ killButterfly(b); continue; }
+    const p = butterflyPositionAt(b.seed, b.originX, b.originZ, (now-b.bornAt)/1000);
+    b.mesh.position.set(p.x,p.y,p.z);
+    const flap = 1 + Math.sin(t*9+b.seed)*0.18;
+    b.mesh.scale.set(0.9*flap, 0.63, 1);
   }
 }
 
@@ -3400,7 +3552,7 @@ function initMultiplayer(){
     db.ref('world/worms').on('child_added', snap=>{
       const val = snap.val();
       if(!val) return;
-      spawnWorm(snap.key, val.x||0, val.y||0, val.z||0, val.lastAteAt||Date.now(), val.lastReproducedAt||Date.now());
+      spawnWorm(snap.key, val.x||0, val.y||0, val.z||0, val.lastAteAt||Date.now(), val.lastReproducedAt||Date.now(), val.eatenCount||0);
     });
     db.ref('world/worms').on('child_changed', snap=>{
       const val = snap.val();
@@ -3409,6 +3561,7 @@ function initMultiplayer(){
       if(typeof val.x==='number'){ w.x = val.x+0.5; w.y = val.y+0.25; w.z = val.z+0.5; }
       if(val.lastAteAt) w.lastAteAt = val.lastAteAt;
       if(val.lastReproducedAt) w.lastReproducedAt = val.lastReproducedAt;
+      if(typeof val.eatenCount==='number') w.eatenCount = val.eatenCount;
     });
     db.ref('world/worms').on('child_removed', snap=>{
       const w = worms.find(w=>w.id===snap.key);
@@ -3420,6 +3573,16 @@ function initMultiplayer(){
       if(snap.exists()) return;
       const spot = findInitialWormSpot();
       if(spot) createWorm(spot.x, spot.y, spot.z);
+    });
+
+    db.ref('world/butterflies').on('child_added', snap=>{
+      const val = snap.val();
+      if(!val) return;
+      spawnButterfly(snap.key, val.x||0, val.y||0, val.z||0, val.bornAt||Date.now());
+    });
+    db.ref('world/butterflies').on('child_removed', snap=>{
+      const b = butterflies.find(b=>b.id===snap.key);
+      if(b) killButterfly(b, true);
     });
 
     db.ref('players').on('child_added', snap=>{
@@ -4200,7 +4363,7 @@ function init(){
   // load. Solo/offline play has no such shared state to check, so it keeps the old local-only spawn.
   if(!fbReady){
     const spot = findInitialWormSpot();
-    if(spot) spawnWorm('local_'+Math.random().toString(36).slice(2,10), spot.x, spot.y, spot.z, Date.now(), Date.now());
+    if(spot) spawnWorm('local_'+Math.random().toString(36).slice(2,10), spot.x, spot.y, spot.z, Date.now(), Date.now(), 0);
   }
 
   window.addEventListener('resize', ()=>{
@@ -4237,6 +4400,7 @@ function animate(now){
   updateFireworks(dt);
   updateFireflies(dt);
   updateWorms(dt);
+  updateButterflies(dt);
   updateGhost(dt);
   heldTorchLight.visible = HOTBAR[selectedSlot]===TORCH;
   if(heldTorchLight.visible) heldTorchLight.intensity = 1.0 + Math.random()*0.3;
@@ -4279,6 +4443,7 @@ function animate(now){
     document.getElementById('fps').textContent = Math.round(fpsCount/fpsTimer);
     fpsTimer=0; fpsCount=0;
     document.getElementById('wormCount').textContent = worms.length;
+    document.getElementById('butterflyCount').textContent = butterflies.length;
   }
 }
 init();
