@@ -3055,13 +3055,16 @@ const fireFlameMaterial = new THREE.MeshBasicMaterial({ map: buildFireSpriteText
 const fireFlameGeo = new THREE.PlaneGeometry(0.95, 1.0);
 
 function tryIgniteFire(hit){
-  if(!hit || !hit.prev) return;
-  if(getBlock(hit.x,hit.y,hit.z)!==WOOD) return; // flint only catches wood
+  if(!hit) return;
+  // Ignites the wood/leaf block you're actually aiming at (not some adjacent empty air cell) — same
+  // instant "catches and starts burning" transition fire spread already uses on its neighbors, so
+  // what you point the flint at is what visibly starts burning, and eventually disappears once its
+  // fire burns out, same as it would for the rest of the tree.
+  if(!FLAMMABLE_BLOCKS.has(getBlock(hit.x,hit.y,hit.z))) return; // flint only catches wood or leaves
   if(invCount(FLINT)<=0) return;
-  const {x,y,z} = hit.prev;
-  if(getBlock(x,y,z)!==AIR) return;
-  if(playerOverlapsCell(x,y,z)) return;
-  igniteFire(x,y,z);
+  const key = hit.x+','+hit.y+','+hit.z;
+  if(fires.has(key)) return; // already burning
+  igniteFire(hit.x,hit.y,hit.z);
   invSub(FLINT,1);
   saveInventory();
   updateHotbarUI();
