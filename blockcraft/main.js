@@ -3959,8 +3959,11 @@ let selectedSlot = 0;
 const HOTBAR_KEYS = ['KeyQ','KeyR','KeyF','KeyT','KeyG','KeyC','KeyX','KeyZ','KeyB'];
 window.addEventListener('keydown', e=>{
   keys[e.code]=true;
-  if(e.code==='KeyD' && e.shiftKey && e.ctrlKey){
-    e.preventDefault(); // otherwise Ctrl+Shift+D is "bookmark all tabs" in most browsers
+  if(e.code==='KeyD' && e.altKey && e.shiftKey && !e.ctrlKey && !e.metaKey){
+    // Alt+Shift+D (Option+Shift+D on macOS) rather than Ctrl/Cmd+Shift+D — that one's "bookmark all
+    // tabs" in Chrome on both Windows/Linux (Ctrl+Shift+D) and macOS (Cmd+Shift+D), and neither Chrome
+    // nor macOS binds anything to Alt+Shift+D by default.
+    e.preventDefault();
     toggleDebugPanel();
     return;
   }
@@ -4132,7 +4135,7 @@ if(isTouchDevice){
   bindTouchButton('btn3p', ()=>{ if(locked) thirdPerson = !thirdPerson; });
 }
 
-// ---------- Debug panel (Shift+Ctrl+D) ----------
+// ---------- Debug panel (Alt+Shift+D) ----------
 // A read-only developer overlay: a full census of every block currently in the world (trees, wood,
 // leaves, water called out up top, everything else below) plus a grab-bag of other live counts that
 // are handy to eyeball while testing. It doesn't pause the game or grab the pointer — it's just an
