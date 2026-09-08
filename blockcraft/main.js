@@ -1078,11 +1078,17 @@ function updateMinimap(){
 
 // ---------- Player ----------
 const GRAVITY = -28, JUMP_SPEED = 9, WALK_SPEED = 5.2, SPRINT_SPEED = 8.4, LADDER_CLIMB_SPEED = 4;
+// Hold Ctrl to crawl: drops to a much shorter hitbox (comfortably under 1 block, so a 1-tall gap with
+// solid floor and ceiling actually clears it) and moves slower, same "hold a modifier key" feel as
+// sprint. player.height/eye shrink to these while crawling and pop back to PLAYER_HEIGHT/PLAYER_EYE
+// the instant Ctrl is released (no "must find headroom before standing" gating — simplest version).
+const PLAYER_HEIGHT = 1.8, PLAYER_EYE = 1.6;
+const CRAWL_HEIGHT = 0.75, CRAWL_EYE = 0.55, CRAWL_SPEED = 2.2;
 const player = {
   pos: new THREE.Vector3(0,0,0),
   vel: new THREE.Vector3(0,0,0),
-  yaw: 0, pitch: 0, onGround: false,
-  width: 0.6, height: 1.8, eye: 1.6,
+  yaw: 0, pitch: 0, onGround: false, crawling: false,
+  width: 0.6, height: PLAYER_HEIGHT, eye: PLAYER_EYE,
 };
 // 10 fixed spawn points spread across the map, as fractions of WORLD_SIZE so they scale with it.
 const SPAWN_POINTS = [
@@ -1942,6 +1948,9 @@ function updateCharacterAnim(dt, moving, sprinting){
   animateWalk(characterMesh, myWalkState, dt, moving, sprinting);
   characterMesh.position.set(player.pos.x, player.pos.y, player.pos.z);
   characterMesh.rotation.y = player.yaw;
+  // Cheap third-person "crawling" tell: squash the whole body toward the ground rather than building a
+  // separate prone pose. The group's origin is at the feet, so this alone keeps it planted correctly.
+  characterMesh.scale.y = player.crawling ? 0.42 : 1;
   updateNameTag(myNameTag, myName, myHP, PLAYER_MAX_HP);
 }
 
@@ -2252,17 +2261,24 @@ function buildCelestialBodies(){
   moonSprite.renderOrder = -1;
   scene.add(moonSprite);
 }
+// +X is East, -X is West (matching the usual Minecraft-style convention) — both bodies ride a single
+// vertical east-west plane through the player rather than a full horizontal circle, so "rise due east,
+// climb overhead, set due west" is actually true instead of the sun also drifting through a third,
+// unlabeled compass point at solar noon.
 function updateCelestialBodies(dayTime){
   const theta = dayTime*Math.PI*2;
-  const sunHeight = Math.sin(theta - Math.PI/2); // unclamped: true rise/set through the horizon
-  const cx = Math.cos(theta), sz = Math.sin(theta);
-  sunSprite.position.set(player.pos.x+cx*SUN_ORBIT_R, player.pos.y+sunHeight*SUN_ORBIT_R*0.6+20, player.pos.z+sz*SUN_ORBIT_R);
+  const sunHeight = -Math.cos(theta); // unclamped: true rise/set through the horizon
+  const sunX = Math.sin(theta);       // +1 (east) at sunrise, 0 (overhead) at noon, -1 (west) at sunset
+  sunSprite.position.set(player.pos.x+sunX*SUN_ORBIT_R, player.pos.y+sunHeight*SUN_ORBIT_R*0.6+20, player.pos.z);
   sunSprite.visible = sunHeight > -0.06;
 
   // The moon sits opposite the sun (rises as the sun sets) and its own arc uses the same sunHeight
   // shape mirrored, so it's up for the night half of the cycle and below the horizon during the day.
+  // Negating sunX doesn't reverse its direction of travel — it's the same east-west sine curve, just
+  // running exactly half a cycle out of phase — so the moon crosses east-to-west too, same as the sun.
   const moonHeight = -sunHeight;
-  moonSprite.position.set(player.pos.x-cx*SUN_ORBIT_R, player.pos.y+moonHeight*SUN_ORBIT_R*0.6+20, player.pos.z-sz*SUN_ORBIT_R);
+  const moonX = -sunX;
+  moonSprite.position.set(player.pos.x+moonX*SUN_ORBIT_R, player.pos.y+moonHeight*SUN_ORBIT_R*0.6+20, player.pos.z);
   moonSprite.visible = moonHeight > -0.06;
 
   const phase = currentMoonPhase();
@@ -2278,7 +2294,7 @@ function updateCelestialBodies(dayTime){
 
   // Keep the sun (and its shadow) at the same angle/height, but centered on the player instead of
   // the world origin, so the shadow camera's small frustum always covers the ground right around you.
-  sunLight.position.set(player.pos.x+cx*SUN_ORBIT_R, Math.max(5, sunHeight*SUN_ORBIT_R*0.6+40), player.pos.z+sz*SUN_ORBIT_R);
+  sunLight.position.set(player.pos.x+sunX*SUN_ORBIT_R, Math.max(5, sunHeight*SUN_ORBIT_R*0.6+40), player.pos.z);
   sunLight.target.position.set(player.pos.x, player.pos.y, player.pos.z);
 }
 
@@ -3569,7 +3585,10 @@ function updatePlayer(dt){
   const len = Math.hypot(mx,mz);
   if(len>0){ mx/=len; mz/=len; }
 
-  const speed = (keys['ShiftLeft']||keys['ShiftRight']) ? SPRINT_SPEED : WALK_SPEED;
+  player.crawling = !!(keys['ControlLeft']||keys['ControlRight']);
+  player.height = player.crawling ? CRAWL_HEIGHT : PLAYER_HEIGHT;
+  player.eye = player.crawling ? CRAWL_EYE : PLAYER_EYE;
+  const speed = player.crawling ? CRAWL_SPEED : (keys['ShiftLeft']||keys['ShiftRight']) ? SPRINT_SPEED : WALK_SPEED;
 
   const wasOnGround = player.onGround;
   const onLadder = isTouchingLadder();
@@ -3819,7 +3838,7 @@ nameInput.addEventListener('keydown', e=> e.stopPropagation());
 if(isTouchDevice){
   document.body.classList.add('touch-device');
   const controlsP = document.getElementById('controlsText');
-  if(controlsP) controlsP.innerHTML = 'A tiny Minecraft-inspired voxel sandbox that runs entirely in your browser.<br><br>Left stick: move &nbsp; Drag right side: look<br>⛏ break/attack &nbsp; ▦ place/interact &nbsp; JUMP jump &nbsp; 3rd camera';
+  if(controlsP) controlsP.innerHTML = 'A tiny Minecraft-inspired voxel sandbox that runs entirely in your browser.<br><br>Left stick: move &nbsp; Drag right side: look<br>⛏ break/attack &nbsp; ▦ place/interact &nbsp; JUMP jump &nbsp; CRAWL hold to crawl &nbsp; 3rd camera';
   const tapP = document.getElementById('tapToPlay');
   if(tapP) tapP.innerHTML = '<strong>Tap anywhere to play</strong>';
   const hintP = document.getElementById('playHint');
@@ -3935,6 +3954,8 @@ if(isTouchDevice){
   bindTouchButton('btnAttack', ()=>{ if(locked && !craftingOpen && !isDead) doAttackOrBreak(); });
   bindTouchButton('btnPlace', ()=>{ if(locked && !craftingOpen && !isDead) doInteract(); });
   bindTouchButton('btnJump', ()=>{ keys['Space']=true; }, ()=>{ keys['Space']=false; });
+  const crawlBtn = document.getElementById('btnCrawl');
+  bindTouchButton('btnCrawl', ()=>{ keys['ControlLeft']=true; crawlBtn.classList.add('active'); }, ()=>{ keys['ControlLeft']=false; crawlBtn.classList.remove('active'); });
   bindTouchButton('btn3p', ()=>{ if(locked) thirdPerson = !thirdPerson; });
 }
 

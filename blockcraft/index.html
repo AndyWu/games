@@ -53,6 +53,8 @@
   #btnAttack{right:20px;bottom:100px;width:74px;height:74px;}
   #btnPlace{right:104px;bottom:100px;width:60px;height:60px;font-size:17px;}
   #btnJump{right:20px;bottom:20px;width:60px;height:60px;font-size:13px;}
+  #btnCrawl{right:92px;bottom:24px;width:52px;height:52px;font-size:11px;}
+  #btnCrawl.active{background:rgba(255,255,255,0.4);}
   #btn3p{right:16px;top:10px;width:44px;height:44px;font-size:16px;z-index:11;}
   #craftHint{position:fixed;bottom:80px;left:50%;transform:translateX(-50%);color:#fff;font-size:13px;font-weight:600;text-shadow:0 0 4px #000;z-index:11;opacity:0;transition:opacity 0.15s;pointer-events:none;background:rgba(0,0,0,0.4);padding:6px 12px;border-radius:6px;}
   #craftHint.show{opacity:1;}
@@ -105,7 +107,7 @@
 <div id="lightningFlash"></div>
 <div id="crosshair"></div>
 <div id="hotbar"></div>
-<div id="hint">Left click: break / attack &nbsp;·&nbsp; Right click: place (or open a table / toggle a window or door / light a fire with flint / launch a firework) &nbsp;·&nbsp; Q R F T G C X Z B: select block &nbsp;·&nbsp; I: inventory &nbsp;·&nbsp; E: craft &nbsp;·&nbsp; V: 3rd person &nbsp;·&nbsp; Esc: release mouse</div>
+<div id="hint">Left click: break / attack &nbsp;·&nbsp; Right click: place (or open a table / toggle a window or door / light a fire with flint / launch a firework) &nbsp;·&nbsp; Q R F T G C X Z B: select block &nbsp;·&nbsp; I: inventory &nbsp;·&nbsp; E: craft &nbsp;·&nbsp; V: 3rd person &nbsp;·&nbsp; Ctrl: hold to crawl &nbsp;·&nbsp; Esc: release mouse</div>
 <div id="craftHint">Right-click the table (or press E) to craft</div>
 <div id="touchControls" hidden>
   <div id="touchLookZone"></div>
@@ -113,6 +115,7 @@
   <button id="btnAttack" class="touchBtn" aria-label="Break / attack">⛏</button>
   <button id="btnPlace" class="touchBtn" aria-label="Place / interact">▦</button>
   <button id="btnJump" class="touchBtn" aria-label="Jump">JUMP</button>
+  <button id="btnCrawl" class="touchBtn" aria-label="Hold to crawl">CRAWL</button>
   <button id="btn3p" class="touchBtn" aria-label="Toggle third person">3rd</button>
 </div>
 <div id="craftingModal" hidden>
@@ -142,7 +145,7 @@
   <h1>Blockcraft</h1>
   <p id="controlsText">
     A tiny Minecraft-inspired voxel sandbox that runs entirely in your browser.<br><br>
-    <span class="key">WASD</span> move &nbsp; <span class="key">Space</span> jump &nbsp; <span class="key">Shift</span> sprint<br>
+    <span class="key">WASD</span> move &nbsp; <span class="key">Space</span> jump &nbsp; <span class="key">Shift</span> sprint &nbsp; <span class="key">Ctrl</span> crawl<br>
     <span class="key">Mouse</span> look &nbsp; <span class="key">Left click</span> break / attack &nbsp; <span class="key">Right click</span> place<br>
     <span class="key">Q R F T G C X Z B</span> select block &nbsp; <span class="key">I</span> inventory &nbsp; <span class="key">E</span> craft at table &nbsp; <span class="key">V</span> 3rd person
   </p>
