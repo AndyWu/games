@@ -2679,13 +2679,21 @@ function updateFireflies(dt){
 }
 
 // ---------- Worms: slowly eat tree leaves, breed, and can be burned to death ----------
-// A single worm spawns on the world's trees at load. Every 2 real hours it eats the nearest leaf
-// block within reach (a genuine world edit — synced/persisted like any other block change, so
-// everyone sees the same tree thin out); every 24 real hours it has 2 children nearby. Population is
-// capped so an unattended world can't grow it forever. Standing in an active fire cell kills it
-// instantly, same "you're in the fire" test the fire-damage tick already uses for animals/players.
-// The worm creature itself (unlike the leaves it eats) is a local decorative simulation, not synced
-// across clients — the same tradeoff already made for fireflies.
+// A single worm spawns on the world's trees the first time anyone loads a world. Every 2 real hours
+// each worm eats the nearest leaf block within reach (a genuine world edit — synced/persisted like
+// any other block change, so everyone sees the same tree thin out); every 24 real hours it has 2
+// children nearby. Population is capped so an unattended world can't grow it forever. Standing in an
+// active fire cell kills it instantly, same "you're in the fire" test the fire-damage tick already
+// uses for animals/players.
+// Unlike fireflies/the ghost, worms themselves ARE synced — under 'world/worms/<id>' — precisely so
+// their eat/reproduce timers survive a reload: without persistence every page load reset every timer
+// to "now", so a single continuously-open tab was the only way either interval could ever actually
+// fire. Each worm's existence, position, and both timestamps live in Firebase (with the timestamp
+// fields written as firebase.database.ServerValue.TIMESTAMP so clocks don't need to agree); every
+// connected client mirrors the same set of worms and independently runs the eat/reproduce checks
+// against those shared timestamps, same client-authoritative, no-transactions approach already used
+// for block edits/saplings/fires elsewhere in this file. In solo/offline play (no Firebase), worms
+// fall back to the old purely-local, resets-on-reload behavior.
 const WORM_EAT_INTERVAL_MS = 2*3600*1000;       // one leaf block every 2 real hours
 const WORM_REPRODUCE_INTERVAL_MS = 24*3600*1000; // 2 children every 24 real hours
 const WORM_CHILDREN_PER_REPRODUCE = 2;
@@ -2716,8 +2724,10 @@ function findInitialWormSpot(){
   }
   return null;
 }
-function spawnWorm(x,y,z,bornAt){
-  if(worms.length>=WORM_MAX_POPULATION) return null;
+// Adds a worm to the local scene/array only — does not touch Firebase. Used both for genuinely new
+// worms (via createWorm, below) and to materialize a worm mirrored in from a remote 'child_added'.
+function spawnWorm(id,x,y,z,lastAteAt,lastReproducedAt){
+  if(worms.length>=WORM_MAX_POPULATION || worms.some(w=>w.id===id)) return null;
   if(!wormGeo){
     wormGeo = new THREE.SphereGeometry(0.16,6,6);
     wormMat = new THREE.MeshLambertMaterial({ color: 0xc98a6b });
@@ -2727,16 +2737,33 @@ function spawnWorm(x,y,z,bornAt){
   mesh.position.set(x+0.5, y+0.25, z+0.5);
   scene.add(mesh);
   const w = {
-    mesh, x:x+0.5, y:y+0.25, z:z+0.5,
-    lastAteAt: bornAt, lastReproducedAt: bornAt, phase: Math.random()*Math.PI*2,
+    id, mesh, x:x+0.5, y:y+0.25, z:z+0.5,
+    lastAteAt, lastReproducedAt, phase: Math.random()*Math.PI*2,
   };
   worms.push(w);
   return w;
 }
-function killWorm(w){
+// Spawns a brand-new worm (initial spawn or reproduction): adds it locally AND, when online, writes
+// it to Firebase so every other client picks it up via the 'child_added' listener in initMultiplayer.
+function createWorm(x,y,z){
+  if(worms.length>=WORM_MAX_POPULATION) return null;
+  const now = Date.now();
+  const id = fbReady ? db.ref('world/worms').push().key : ('local_'+Math.random().toString(36).slice(2,10));
+  const w = spawnWorm(id,x,y,z,now,now);
+  if(w && fbReady){
+    db.ref('world/worms/'+id).set({
+      x, y, z,
+      lastAteAt: firebase.database.ServerValue.TIMESTAMP,
+      lastReproducedAt: firebase.database.ServerValue.TIMESTAMP,
+    });
+  }
+  return w;
+}
+function killWorm(w, fromRemote){
   scene.remove(w.mesh);
   const i = worms.indexOf(w);
   if(i>=0) worms.splice(i,1);
+  if(!fromRemote && fbReady) db.ref('world/worms/'+w.id).remove();
 }
 function updateWorms(dt){
   const now = Date.now();
@@ -2752,15 +2779,21 @@ function updateWorms(dt){
     if(now - w.lastAteAt >= WORM_EAT_INTERVAL_MS){
       w.lastAteAt = now;
       const leaf = findNearestLeaf(w.x, w.y, w.z, WORM_SEARCH_RADIUS);
+      const update = { lastAteAt: firebase.database.ServerValue.TIMESTAMP };
       if(leaf){
         applyWorldEdit(leaf.x, leaf.y, leaf.z, AIR, false);
         w.x = leaf.x+0.5; w.y = leaf.y+0.25; w.z = leaf.z+0.5;
+        update.x = leaf.x; update.y = leaf.y; update.z = leaf.z;
       }
+      if(fbReady) db.ref('world/worms/'+w.id).update(update);
     }
     if(now - w.lastReproducedAt >= WORM_REPRODUCE_INTERVAL_MS){
       w.lastReproducedAt = now;
-      for(let i=0;i<WORM_CHILDREN_PER_REPRODUCE;i++){
-        spawnWorm(Math.floor(w.x)+(Math.random()<0.5?-1:1), Math.floor(w.y), Math.floor(w.z)+(Math.random()<0.5?-1:1), now);
+      if(fbReady) db.ref('world/worms/'+w.id+'/lastReproducedAt').set(firebase.database.ServerValue.TIMESTAMP);
+      if(worms.length<WORM_MAX_POPULATION){
+        for(let i=0;i<WORM_CHILDREN_PER_REPRODUCE;i++){
+          createWorm(Math.floor(w.x)+(Math.random()<0.5?-1:1), Math.floor(w.y), Math.floor(w.z)+(Math.random()<0.5?-1:1));
+        }
       }
     }
     w.mesh.position.set(w.x, w.y + Math.sin(t*1.5+w.phase)*0.04, w.z);
@@ -3341,6 +3374,31 @@ function initMultiplayer(){
       const val = snap.val();
       if(!val || val.by===myId) return; // we already played our own launch locally
       spawnFireworkEffect(val.x, val.z, val.y, val.targetY);
+    });
+
+    db.ref('world/worms').on('child_added', snap=>{
+      const val = snap.val();
+      if(!val) return;
+      spawnWorm(snap.key, val.x||0, val.y||0, val.z||0, val.lastAteAt||Date.now(), val.lastReproducedAt||Date.now());
+    });
+    db.ref('world/worms').on('child_changed', snap=>{
+      const val = snap.val();
+      const w = worms.find(w=>w.id===snap.key);
+      if(!w || !val) return;
+      if(typeof val.x==='number'){ w.x = val.x+0.5; w.y = val.y+0.25; w.z = val.z+0.5; }
+      if(val.lastAteAt) w.lastAteAt = val.lastAteAt;
+      if(val.lastReproducedAt) w.lastReproducedAt = val.lastReproducedAt;
+    });
+    db.ref('world/worms').on('child_removed', snap=>{
+      const w = worms.find(w=>w.id===snap.key);
+      if(w) killWorm(w, true);
+    });
+    // Nobody's created the first worm for this shared world yet — do it once, the same "first client
+    // in wins" approach the rest of this file relies on rather than a transaction.
+    db.ref('world/worms').once('value').then(snap=>{
+      if(snap.exists()) return;
+      const spot = findInitialWormSpot();
+      if(spot) createWorm(spot.x, spot.y, spot.z);
     });
 
     db.ref('players').on('child_added', snap=>{
@@ -4107,11 +4165,17 @@ function init(){
   rebuildAllChunks();
   spawnPlayer();
   spawnAnimals();
-  { const spot = findInitialWormSpot(); if(spot) spawnWorm(spot.x, spot.y, spot.z, Date.now()); }
   updateHotbarUI();
   updateHeldItemColor();
   updateHeartsUI();
   initMultiplayer();
+  // Firebase (when available) owns worm creation — see the 'world/worms' once('value') check in
+  // initMultiplayer — so a fresh, unconnected worm doesn't pop into existence on every single client's
+  // load. Solo/offline play has no such shared state to check, so it keeps the old local-only spawn.
+  if(!fbReady){
+    const spot = findInitialWormSpot();
+    if(spot) spawnWorm('local_'+Math.random().toString(36).slice(2,10), spot.x, spot.y, spot.z, Date.now(), Date.now());
+  }
 
   window.addEventListener('resize', ()=>{
     camera.aspect = window.innerWidth/window.innerHeight;
