@@ -2699,10 +2699,10 @@ function updateFireflies(dt){
 // hours (Blockcraft's clock, not the wall clock — DAY_LENGTH_S real seconds is a full 24-hour
 // in-game day, so this works out to DAY_LENGTH_S/12 real seconds) each worm eats the nearest leaf
 // block within reach (a genuine world edit — synced/persisted like any other block change, so
-// everyone sees the same tree thin out); every 24 in-game hours (one full in-game day, i.e.
-// DAY_LENGTH_S real seconds) it has 2 children nearby. Population is capped so an unattended world
-// can't grow it forever. Standing in an active fire cell kills it instantly, same "you're in the
-// fire" test the fire-damage tick already uses for animals/players.
+// everyone sees the same tree thin out); every 1 in-game hour (DAY_LENGTH_S/24 real seconds) it has
+// 2 children nearby. Population is capped so an unattended world can't grow it forever. Standing in
+// an active fire cell kills it instantly, same "you're in the fire" test the fire-damage tick
+// already uses for animals/players.
 // Unlike fireflies/the ghost, worms themselves ARE synced — under 'world/worms/<id>' — precisely so
 // their eat/reproduce timers survive a reload: without persistence every page load reset every timer
 // to "now", so a single continuously-open tab was the only way either interval could ever actually
@@ -2712,8 +2712,8 @@ function updateFireflies(dt){
 // against those shared timestamps, same client-authoritative, no-transactions approach already used
 // for block edits/saplings/fires elsewhere in this file. In solo/offline play (no Firebase), worms
 // fall back to the old purely-local, resets-on-reload behavior.
-const WORM_EAT_INTERVAL_MS = DAY_LENGTH_S*1000 * (2/24);  // one leaf block every 2 in-game hours
-const WORM_REPRODUCE_INTERVAL_MS = DAY_LENGTH_S*1000;     // 2 children every 24 in-game hours (1 full day)
+const WORM_EAT_INTERVAL_MS = DAY_LENGTH_S*1000 * (2/24); // one leaf block every 2 in-game hours
+const WORM_REPRODUCE_INTERVAL_MS = DAY_LENGTH_S*1000 * (1/24); // 2 children every 1 in-game hour
 const WORM_CHILDREN_PER_REPRODUCE = 2;
 const WORM_MAX_POPULATION = 100;
 const WORM_SEARCH_RADIUS = 6;
