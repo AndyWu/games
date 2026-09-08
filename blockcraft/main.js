@@ -3959,6 +3959,11 @@ let selectedSlot = 0;
 const HOTBAR_KEYS = ['KeyQ','KeyR','KeyF','KeyT','KeyG','KeyC','KeyX','KeyZ','KeyB'];
 window.addEventListener('keydown', e=>{
   keys[e.code]=true;
+  if(e.code==='KeyD' && e.shiftKey && e.ctrlKey){
+    e.preventDefault(); // otherwise Ctrl+Shift+D is "bookmark all tabs" in most browsers
+    toggleDebugPanel();
+    return;
+  }
   if(e.code==='Escape'){
     if(craftingOpen){ closeCrafting(false); return; }
     if(itemsOpen){ closeItems(false); return; }
@@ -4125,6 +4130,83 @@ if(isTouchDevice){
   const crawlBtn = document.getElementById('btnCrawl');
   bindTouchButton('btnCrawl', ()=>{ keys['ControlLeft']=true; crawlBtn.classList.add('active'); }, ()=>{ keys['ControlLeft']=false; crawlBtn.classList.remove('active'); });
   bindTouchButton('btn3p', ()=>{ if(locked) thirdPerson = !thirdPerson; });
+}
+
+// ---------- Debug panel (Shift+Ctrl+D) ----------
+// A read-only developer overlay: a full census of every block currently in the world (trees, wood,
+// leaves, water called out up top, everything else below) plus a grab-bag of other live counts that
+// are handy to eyeball while testing. It doesn't pause the game or grab the pointer — it's just an
+// overlay, like Minecraft's own F3 screen — and refreshes on a slow timer while open rather than every
+// frame, since walking the whole world array is cheap but pointless to redo 60 times a second for
+// numbers that only change when someone breaks a block or a worm eats a leaf.
+// "Trees" specifically counts live trunk bases — a WOOD block sitting directly on the natural terrain
+// surface (heightAt(x,z)+1) — rather than trying to flood-fill distinct trees out of the census, which
+// runs into the exact same neighboring-trees-blur problem already noted on checkTreeSupport. This
+// undercounts a giant tree as just one tree (correct) and only counts ones with an intact base (also
+// what "how many trees are still standing" should mean), at the cost of occasionally miscounting a
+// single player-placed wood block that happens to sit exactly at natural ground level as a "tree" —
+// an acceptable rough edge for a debug readout, not a scored feature.
+let debugPanelOpen = false;
+let debugPanelTimer = 0;
+function debugBlockName(id){
+  if(id===AIR) return 'Air';
+  if(id===BEDROCK) return 'Bedrock';
+  return BLOCK_NAME[id] || ('Block #'+id);
+}
+function computeWorldCensus(){
+  const counts = new Uint32Array(256);
+  for(let i=0;i<world.length;i++) counts[world[i]]++;
+  let treeCount = 0;
+  for(let x=0;x<WORLD_SIZE;x++){
+    for(let z=0;z<WORLD_SIZE;z++){
+      const h = heightAt(x,z);
+      if(h+1<WORLD_HEIGHT && getBlock(x,h+1,z)===WOOD) treeCount++;
+    }
+  }
+  return { counts, treeCount };
+}
+function renderDebugPanel(){
+  const panel = document.getElementById('debugPanel');
+  if(!panel || !debugPanelOpen) return;
+  const { counts, treeCount } = computeWorldCensus();
+  const rows = [];
+  for(let id=1; id<256; id++) if(counts[id]>0) rows.push({ id, name: debugBlockName(id), count: counts[id] });
+  rows.sort((a,b)=>b.count-a.count);
+  const chunkX = Math.floor(player.pos.x/CHUNK_SIZE), chunkZ = Math.floor(player.pos.z/CHUNK_SIZE);
+  const fps = document.getElementById('fps');
+  panel.innerHTML = `
+    <h3>World census</h3>
+    <table>
+      <tr><td>🌳 Trees (standing)</td><td>${treeCount.toLocaleString()}</td></tr>
+      <tr><td>🪵 Wood if all cut</td><td>${(counts[WOOD]||0).toLocaleString()}</td></tr>
+      <tr><td>🍃 Leaves blocks</td><td>${(counts[LEAVES]||0).toLocaleString()}</td></tr>
+      <tr><td>💧 Water blocks</td><td>${(counts[WATER]||0).toLocaleString()}</td></tr>
+    </table>
+    <h3>All block types</h3>
+    <table>${rows.map(r=>`<tr><td>${r.name}</td><td>${r.count.toLocaleString()}</td></tr>`).join('')}</table>
+    <h3>Live stats</h3>
+    <table>
+      <tr><td>FPS</td><td>${fps?fps.textContent:'?'}</td></tr>
+      <tr><td>Block edits</td><td>${edits.size.toLocaleString()}</td></tr>
+      <tr><td>Chunk meshes built</td><td>${chunkMeshes.size} / ${CHUNKS_PER_SIDE*CHUNKS_PER_SIDE}</td></tr>
+      <tr><td>Animals</td><td>${animals.length}</td></tr>
+      <tr><td>Worms</td><td>${worms.length}</td></tr>
+      <tr><td>Butterflies</td><td>${butterflies.length}</td></tr>
+      <tr><td>Active fires</td><td>${fires.size}</td></tr>
+      <tr><td>Falling clusters</td><td>${fallingClusters.length}</td></tr>
+      <tr><td>Players online</td><td>${remotePlayers.size+1}</td></tr>
+      <tr><td>Multiplayer</td><td>${fbReady?'Online':'Offline (solo)'}</td></tr>
+      <tr><td>Your position</td><td>${player.pos.x.toFixed(1)}, ${player.pos.y.toFixed(1)}, ${player.pos.z.toFixed(1)}</td></tr>
+      <tr><td>Your chunk</td><td>${chunkX}, ${chunkZ}</td></tr>
+      <tr><td>World size</td><td>${WORLD_SIZE}×${WORLD_SIZE}×${WORLD_HEIGHT}</td></tr>
+    </table>
+  `;
+}
+function toggleDebugPanel(){
+  debugPanelOpen = !debugPanelOpen;
+  const panel = document.getElementById('debugPanel');
+  if(panel) panel.hidden = !debugPanelOpen;
+  if(debugPanelOpen){ debugPanelTimer = 0; renderDebugPanel(); }
 }
 
 function swatchColor(id){ return '#' + BLOCK_COLOR[id].toString(16).padStart(6,'0'); }
@@ -4444,6 +4526,11 @@ function animate(now){
     fpsTimer=0; fpsCount=0;
     document.getElementById('wormCount').textContent = worms.length;
     document.getElementById('butterflyCount').textContent = butterflies.length;
+  }
+
+  if(debugPanelOpen){
+    debugPanelTimer -= dt;
+    if(debugPanelTimer<=0){ debugPanelTimer = 2; renderDebugPanel(); }
   }
 }
 init();

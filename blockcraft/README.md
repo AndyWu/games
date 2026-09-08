@@ -154,6 +154,10 @@ To point the game at your own Firebase project:
 
 If you don't want multiplayer at all, delete `firebase-config.js` and its `<script>` tag in `index.html` — the game detects the missing config and falls back to solo mode automatically (with everything saved to local `localStorage` instead).
 
+## Debug panel
+
+Press `Ctrl+Shift+D` to toggle a read-only overlay in the top-right corner — it doesn't pause the game or grab the mouse, so you can keep playing with it open. It shows a full census of every block currently in the world (trees, wood, leaves, and water called out up top — "wood if all cut" is exactly how many Wood items chopping down every tree would give you — then every other block type below, most common first), plus a handful of other live numbers: FPS, block edits, chunk meshes actually built, animal/worm/butterfly/fire counts, players online, your position and chunk, and the world's dimensions. "Trees" counts live trunk bases specifically (so a 5x giant tree still counts as one tree, and a felled trunk doesn't), refreshing every 2 seconds while the panel stays open.
+
 ## Notes
 
 - The world is a fixed 128×128 block area (4x the original map) with procedurally generated hills, a beach/water line, and scattered trees — regenerated from a fixed seed, so it's the same every time you load it. The world is flooded two blocks higher than its original sea level, so some ground that used to be shoreline is underwater now.
