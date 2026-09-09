@@ -133,7 +133,7 @@ const ANIMAL_REAL_HEIGHT = {
 const MEAT_YIELD = { dog:1, sheep:1, lion:2, cow:2, giraffe:3, elephant:4,
   robin:1, sparrow:1, blue_jay:1, cardinal:1, crow:2, bluebird:1, finch:1, swallow:1, dove:1, woodpecker:1, owl:2, hawk:2, eagle:2, parrot:1, toucan:1, flamingo:2, hummingbird:1, kingfisher:1, heron:2, pelican:2, seagull:1, magpie:1, raven:2, wren:1, chickadee:1, oriole:1, warbler:1, swan:2, duck:1, goose:2,
   goldfish:1, bass:1, salmon:1, tuna:2, clownfish:1, catfish:1, shark:3, whaleshark:5,
-  worm:1, gopher:2,
+  worm:1, gopher:2, bigeagle:3,
 };
 // Rough horizontal collision radius per species, used for entity-vs-entity collision below.
 const ANIMAL_RADIUS = {
@@ -1509,7 +1509,7 @@ function groundHeightAt(x,z){
   }
   return 1;
 }
-const SPAWN_COUNTS = { cow:4, sheep:5, dog:3, giraffe:3, lion:2, elephant:2 };
+const SPAWN_COUNTS = { cow:16, sheep:20, dog:12, giraffe:12, lion:8, elephant:8 }; // 4x the original counts
 function findSpawnSpot(seedX, seedZ){
   let x,z,h,tries=0;
   do{
@@ -1660,14 +1660,20 @@ function damageAnimal(a, dmg){
     killAnimal(a);
   }
 }
-function damageBirdOrFish(entity, dmg, type){
+// awardMeat defaults true (the player landed the hit, via tryAttack below) — a big eagle eating a
+// bird or fish passes false, same reasoning as killWorm's reason string: only a kill the player
+// actually delivers should ever put Meat in their inventory.
+function damageBirdOrFish(entity, dmg, type, awardMeat){
+  if(awardMeat===undefined) awardMeat = true;
   entity.hp = Math.max(0, entity.hp - dmg);
   if(entity.hp<=0){
     SFX.animalDeath();
-    const speciesId = entity.species.id;
-    invAdd(MEAT, MEAT_YIELD[speciesId] || 1);
-    saveInventory();
-    updateHotbarUI();
+    if(awardMeat){
+      const speciesId = entity.species.id;
+      invAdd(MEAT, MEAT_YIELD[speciesId] || 1);
+      saveInventory();
+      updateHotbarUI();
+    }
     scene.remove(entity.mesh);
     const arr = type==='bird' ? birds : fish;
     const idx = arr.indexOf(entity);
@@ -1684,6 +1690,18 @@ function damageGopher(gopher, dmg){
     scene.remove(gopher.mesh);
     const idx = gophers.indexOf(gopher);
     if(idx>=0) gophers.splice(idx, 1);
+  }
+}
+function damageBigEagle(eagle, dmg){
+  eagle.hp = Math.max(0, eagle.hp - dmg);
+  if(eagle.hp<=0){
+    SFX.animalDeath();
+    invAdd(MEAT, MEAT_YIELD.bigeagle || 3);
+    saveInventory();
+    updateHotbarUI();
+    scene.remove(eagle.mesh);
+    const idx = bigEagles.indexOf(eagle);
+    if(idx>=0) bigEagles.splice(idx, 1);
   }
 }
 function applyRemoteMobHp(id, hp){
@@ -2068,6 +2086,13 @@ function findAttackTarget(){
     const dot = (dx/dist)*dir.x + (dy/dist)*dir.y + (dz/dist)*dir.z;
     if(dot>ATTACK_ANGLE_COS){ best = {type:'gopher', ref:gopher}; bestDist = dist; }
   });
+  bigEagles.forEach(eagle=>{
+    const dx=eagle.mesh.position.x-origin.x, dy=(eagle.mesh.position.y)-origin.y, dz=eagle.mesh.position.z-origin.z;
+    const dist = Math.hypot(dx,dy,dz);
+    if(dist>ATTACK_RANGE || dist>=bestDist) return;
+    const dot = (dx/dist)*dir.x + (dy/dist)*dir.y + (dz/dist)*dir.z;
+    if(dot>ATTACK_ANGLE_COS){ best = {type:'bigeagle', ref:eagle}; bestDist = dist; }
+  });
   remotePlayers.forEach((e,id)=>{
     const dx=e.mesh.position.x-origin.x, dy=(e.mesh.position.y+1.0)-origin.y, dz=e.mesh.position.z-origin.z;
     const dist = Math.hypot(dx,dy,dz);
@@ -2097,6 +2122,7 @@ function tryAttack(){
     else if(target.type==='bird') damageBirdOrFish(target.ref, PLAYER_ATTACK_DMG, 'bird');
     else if(target.type==='fish') damageBirdOrFish(target.ref, PLAYER_ATTACK_DMG, 'fish');
     else if(target.type==='gopher') damageGopher(target.ref, PLAYER_ATTACK_DMG);
+    else if(target.type==='bigeagle') damageBigEagle(target.ref, PLAYER_ATTACK_DMG);
     else damageRemotePlayer(target.id, target.ref, PLAYER_ATTACK_DMG);
   }
   return true;
@@ -3642,6 +3668,99 @@ function updateBirds(dt){
           if(d2<bestD2){ nearest = w; bestD2 = d2; }
         }
         if(nearest) killWorm(nearest, 'eaten');
+      }
+    }
+  }
+}
+
+// ---------- Big Eagles: 2 apex predators that hunt other birds and fish ----------
+// Reuses the exact same bird model (buildBirdMesh) and home-point-recycling wander pattern as the
+// regular birds above, just scaled way up and with its own slower, more majestic wingbeat — same
+// "one model, differentiate by size/color" approach used for the big Shark/Whale Shark fish. Only 2
+// exist, ranging much further than a regular bird (BIG_EAGLE_RADIUS), and roughly once per in-game
+// day each one hunts down whatever bird or fish is currently nearest it and eats it — a clean kill,
+// no meat drop (see damageBirdOrFish's awardMeat flag: only a kill the player lands themselves ever
+// puts Meat in their inventory, same reasoning as birds eating worms below WORM_MIN_POPULATION_FOR_
+// PREDATION). They're themselves attackable and drop Meat like every other creature here.
+const BIG_EAGLE_COUNT = 2;
+const BIG_EAGLE_SPECIES = { id:'bigeagle', name:'Giant Eagle', body:0x4a3a2a, accent:0xe8dcc8, size:3.0, pitch:0.4 };
+const BIG_EAGLE_RADIUS = 40;
+const BIG_EAGLE_HUNT_INTERVAL_MS = DAY_LENGTH_S*1000; // once per in-game day
+const BIG_EAGLE_HUNT_RADIUS = 15;
+const bigEagles = [];
+function spawnBigEagleHome(e){
+  const ang = Math.random()*Math.PI*2, r = 10+Math.random()*(BIG_EAGLE_RADIUS-10);
+  const x = player.pos.x + Math.cos(ang)*r;
+  const z = player.pos.z + Math.sin(ang)*r;
+  const targetBaseY = heightAt(Math.floor(x), Math.floor(z)) + 10 + Math.random()*10; // soars higher than regular birds
+  e.homeXTarget = x; e.homeZTarget = z; e.baseYTarget = targetBaseY;
+  e.transitionTime = 2; e.transitionElapsed = 0;
+  if(e.homeX===0 && e.homeZ===0){
+    e.homeX = x; e.homeZ = z; e.baseY = targetBaseY;
+    e.homeXTarget = x; e.homeZTarget = z; e.baseYTarget = targetBaseY;
+    e.transitionTime = 0;
+  }
+}
+function ensureBigEagles(){
+  if(bigEagles.length) return;
+  for(let i=0;i<BIG_EAGLE_COUNT;i++){
+    const mesh = buildBirdMesh(BIG_EAGLE_SPECIES);
+    scene.add(mesh);
+    const e = {
+      mesh, species: BIG_EAGLE_SPECIES, homeX:0, homeZ:0, baseY:0,
+      hp: 4, maxHp: 4,
+      freqX: 0.08+Math.random()*0.1, freqY: 0.2+Math.random()*0.2, freqZ: 0.08+Math.random()*0.1,
+      ampXZ: 10+Math.random()*8, ampY: 2+Math.random()*2, phase: Math.random()*Math.PI*2,
+      flapPhase: Math.random()*Math.PI*2, flapSpeed: 4+Math.random()*2, // slower, more majestic than small birds
+      // Staggered so the two eagles don't both hunt the instant the world loads.
+      lastHuntAt: Date.now() - Math.random()*BIG_EAGLE_HUNT_INTERVAL_MS,
+    };
+    spawnBigEagleHome(e);
+    bigEagles.push(e);
+  }
+}
+function updateBigEagles(dt){
+  ensureBigEagles();
+  const t = performance.now()/1000;
+  const now = Date.now();
+  for(const e of bigEagles){
+    if(e.transitionTime > 0){
+      e.transitionElapsed += dt;
+      const alpha = Math.min(1, e.transitionElapsed / e.transitionTime);
+      e.homeX += (e.homeXTarget - e.homeX) * alpha;
+      e.homeZ += (e.homeZTarget - e.homeZ) * alpha;
+      e.baseY += (e.baseYTarget - e.baseY) * alpha;
+    }
+
+    const dx = e.homeXTarget-player.pos.x, dz = e.homeZTarget-player.pos.z;
+    if(dx*dx+dz*dz > BIG_EAGLE_RADIUS*BIG_EAGLE_RADIUS) spawnBigEagleHome(e);
+    const ax = t*e.freqX+e.phase, az = t*e.freqZ+e.phase*1.3, ay = t*e.freqY+e.phase*0.7;
+    const x = e.homeX + Math.sin(ax)*e.ampXZ;
+    const z = e.homeZ + Math.cos(az)*e.ampXZ;
+    const y = Math.max(4, e.baseY + Math.sin(ay)*e.ampY);
+    e.mesh.position.set(x,y,z);
+    const vx = Math.cos(ax)*e.freqX*e.ampXZ, vz = -Math.sin(az)*e.freqZ*e.ampXZ;
+    if(vx*vx+vz*vz > 0.0001) e.mesh.rotation.y = Math.atan2(-vx,-vz);
+
+    e.flapPhase += dt*e.flapSpeed;
+    const flap = Math.sin(e.flapPhase)*0.7;
+    for(const wingPivot of e.mesh.userData.wings) wingPivot.rotation.z = wingPivot.userData.side*flap;
+
+    if(now - e.lastHuntAt >= BIG_EAGLE_HUNT_INTERVAL_MS){
+      let nearest = null, nearestType = null, bestD2 = BIG_EAGLE_HUNT_RADIUS*BIG_EAGLE_HUNT_RADIUS;
+      for(const b of birds){
+        const bdx=b.mesh.position.x-x, bdy=b.mesh.position.y-y, bdz=b.mesh.position.z-z;
+        const d2 = bdx*bdx+bdy*bdy+bdz*bdz;
+        if(d2<bestD2){ nearest=b; nearestType='bird'; bestD2=d2; }
+      }
+      for(const f of fish){
+        const fdx=f.mesh.position.x-x, fdy=f.mesh.position.y-y, fdz=f.mesh.position.z-z;
+        const d2 = fdx*fdx+fdy*fdy+fdz*fdz;
+        if(d2<bestD2){ nearest=f; nearestType='fish'; bestD2=d2; }
+      }
+      if(nearest){
+        e.lastHuntAt = now;
+        damageBirdOrFish(nearest, nearest.hp, nearestType, false);
       }
     }
   }
@@ -5460,6 +5579,7 @@ function animate(now){
   updateGhost(dt);
   updateBirds(dt);
   updateFish(dt);
+  updateBigEagles(dt);
   updateGophers(dt);
   heldTorchLight.visible = HOTBAR[selectedSlot]===TORCH;
   if(heldTorchLight.visible) heldTorchLight.intensity = 1.0 + Math.random()*0.3;
