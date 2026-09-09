@@ -139,9 +139,9 @@ const MEAT_YIELD = { dog:1, sheep:1, lion:2, cow:2, giraffe:3, elephant:4,
 const ANIMAL_RADIUS = {
   sheep: 0.35, dog: 0.22, cow: 0.5, giraffe: 0.5, lion: 0.4, elephant: 0.95,
 };
-// Reproduction mechanics: animals reproduce when two of the same species meet
-// Cooldown: 30 in-game days (30 * DAY_LENGTH_S * 1000 ms)
-const ANIMAL_REPRODUCE_INTERVAL_MS = 30 * DAY_LENGTH_S * 1000;
+// Reproduction mechanics: animals reproduce when two of the same species meet.
+// Cooldown is set in real-time ms further below (ANIMAL_REPRODUCE_INTERVAL_MS), once
+// DAY_LENGTH_S is defined, since it's expressed as 30 in-game days.
 const ANIMAL_REPRODUCE_RANGE = 2.0; // how close animals need to be to reproduce
 
 // ---------- Crafting ----------
@@ -2270,6 +2270,8 @@ function updateFallingClusters(dt){
 // every client (and a fresh page reload) is automatically on the same clock with no syncing needed.
 // 0 = midnight, 0.25 = sunrise, 0.5 = noon, 0.75 = sunset.
 const DAY_LENGTH_S = 3600; // 1 real hour per full day/night cycle
+// Animal reproduction cooldown (see ANIMAL_REPRODUCE_RANGE above): 30 in-game days.
+const ANIMAL_REPRODUCE_INTERVAL_MS = 30 * DAY_LENGTH_S * 1000;
 const DAY_KEYFRAMES = [
   { t:0.00, sky:0x05070f, hemi:0.22, sunI:0.00, sunC:0x223355 },
   { t:0.20, sky:0x0d1330, hemi:0.25, sunI:0.00, sunC:0x223355 },
