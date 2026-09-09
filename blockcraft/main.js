@@ -706,11 +706,34 @@ function generateWorld(){
 // variants route through applyWorldEdit so a sapling maturing at runtime is persisted/synced/
 // rendered like any other edit.
 const TALL_TREE_CHANCE = 0.05; // fraction of trees that grow to 5x their normal height
+const TREE_BRANCH_SPACING = 4; // vertical blocks between each branch on a tall tree's trunk
 function plantTreeCells(x,y,z,writeFn){
   const baseHeight = 4 + Math.floor(hash2(x+1,z+1)*3);
   const isTall = hash2(x+13,z+29) < TALL_TREE_CHANCE;
   const height = isTall ? baseHeight*5 : baseHeight;
   for(let i=0;i<height;i++) writeFn(x,y+i,z,WOOD,true);
+
+  // Tall trees (5x normal height) grow branches along the trunk: short wood limbs jutting outward
+  // at regular intervals, each with its own small leaf clump — otherwise a trunk that tall reads as
+  // an unnaturally bare pole with a single canopy way up top. Deterministic per (x,branch-height), same
+  // hash-based approach as the rest of world-gen, so this reconstructs identically every time
+  // plantTreeCells is called for this tree (regrowth and the chop/collapse check both rely on that).
+  if(isTall){
+    for(let by=4; by<height-3; by+=TREE_BRANCH_SPACING){
+      const dirSeed = hash2(x+by*7.7+0.5, z+by*3.3+0.5);
+      const angle = dirSeed*Math.PI*2;
+      const dirX = Math.round(Math.cos(angle)), dirZ = Math.round(Math.sin(angle));
+      if(dirX===0 && dirZ===0) continue; // straight up/down isn't a valid branch direction, skip this slot
+      const len = 2 + Math.floor(hash2(x+by*1.1, z+by*9.9)*2); // 2-3 blocks long
+      let bx=x, bz=z, bY=y+by;
+      for(let i=1;i<=len;i++){ bx+=dirX; bz+=dirZ; bY += (i>=len-1?1:0); writeFn(bx,bY,bz,WOOD,true); }
+      for(let dy=-1;dy<=1;dy++) for(let dx=-1;dx<=1;dx++) for(let dz=-1;dz<=1;dz++){
+        if(Math.abs(dx)+Math.abs(dz)+Math.abs(dy)>2) continue; // rounder clump than a full cube
+        writeFn(bx+dx, bY+dy, bz+dz, LEAVES, false);
+      }
+    }
+  }
+
   const top = y+height;
   for(let dy=-2;dy<=1;dy++){
     const r = dy>=0 ? 1 : 2;
@@ -3788,6 +3811,52 @@ function updateSaplings(dt){
   if(saplingSpawnTimer<=0){ saplingSpawnTimer = SAPLING_SPAWN_CHECK_S; trySpawnSapling(); }
 }
 
+// ---------- Tree regrowth: leaves slowly grow back as long as the trunk still stands ----------
+// A tree's exact original shape (trunk + canopy + any branches) is fully deterministic — the same
+// plantTreeCells(x,baseY,z,...) call used to plant it in the first place always reconstructs the
+// identical cell layout (see checkTreeSupport above, which relies on the same trick). So regrowth
+// doesn't need its own registry of "which trees exist": each tick, sample a few random columns near
+// the player, and any one whose base cell (heightAt(x,z)+1) is still WOOD is a living trunk — replay
+// its shape and fill back in one missing LEAVES cell at a time, on a per-tree cooldown so it reads as
+// gradual regrowth rather than an instant refill. A trunk that's been chopped down to the ground no
+// longer matches (its base cell is AIR), so it simply stops being found and never regrows.
+const TREE_REGROW_CHECK_S = 3;          // how often each client samples nearby columns for trunks
+const TREE_REGROW_SCAN_RADIUS = 24;     // how far from the player to sample
+const TREE_REGROW_SAMPLES_PER_CHECK = 20;
+const TREE_REGROW_LEAF_INTERVAL_S = 8;  // real seconds between each leaf a given tree regrows
+const treeRegrowCooldowns = new Map();  // key "x,z" (trunk base column) -> next allowed regrow time (s)
+let treeRegrowTimer = 0;
+function updateTreeRegrowth(dt){
+  treeRegrowTimer -= dt;
+  if(treeRegrowTimer>0) return;
+  treeRegrowTimer = TREE_REGROW_CHECK_S;
+
+  const nowS = performance.now()/1000;
+  const px = Math.floor(player.pos.x), pz = Math.floor(player.pos.z);
+  for(let tries=0; tries<TREE_REGROW_SAMPLES_PER_CHECK; tries++){
+    const x = px + Math.floor((Math.random()*2-1)*TREE_REGROW_SCAN_RADIUS);
+    const z = pz + Math.floor((Math.random()*2-1)*TREE_REGROW_SCAN_RADIUS);
+    if(x<1 || z<1 || x>=WORLD_SIZE-1 || z>=WORLD_SIZE-1) continue;
+    const h = heightAt(x,z);
+    if(h<=SEA_LEVEL) continue;
+    const baseY = h+1;
+    if(getBlock(x,baseY,z)!==WOOD) continue; // no living trunk rooted at this column
+
+    const key = x+','+z;
+    if(nowS < (treeRegrowCooldowns.get(key)||0)) continue;
+
+    let missing = null;
+    plantTreeCells(x, baseY, z, (bx,by,bz,b)=>{
+      if(missing || b!==LEAVES) return;
+      if(getBlock(bx,by,bz)===AIR) missing = {x:bx,y:by,z:bz};
+    });
+    if(missing){
+      applyWorldEdit(missing.x, missing.y, missing.z, LEAVES, false);
+      treeRegrowCooldowns.set(key, nowS + TREE_REGROW_LEAF_INTERVAL_S);
+    }
+  }
+}
+
 // ---------- Fire: light a wood block with flint, burns for half a Blockcraft day (30 real min) ----------
 // Fire is a non-solid hazard, not a block you can stand on or bump into (see blockSolid/TRANSPARENT_
 // BLOCKS): it's drawn as two crossed billboard sprites rather than a cube (ensureFireFx), it hurts
@@ -5240,6 +5309,7 @@ function animate(now){
   updateRespawns(dt);
   updateFallingClusters(dt);
   updateSaplings(dt);
+  updateTreeRegrowth(dt);
   updateFires(dt);
   updateFireworks(dt);
   updateFireflies(dt);
