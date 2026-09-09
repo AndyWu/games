@@ -132,7 +132,7 @@ const ANIMAL_REAL_HEIGHT = {
 // order. Birds/fish scale by size too: large flying/aquatic species (eagle, swan, tuna) drop 2.
 const MEAT_YIELD = { dog:1, sheep:1, lion:2, cow:2, giraffe:3, elephant:4,
   robin:1, sparrow:1, blue_jay:1, cardinal:1, crow:2, bluebird:1, finch:1, swallow:1, dove:1, woodpecker:1, owl:2, hawk:2, eagle:2, parrot:1, toucan:1, flamingo:2, hummingbird:1, kingfisher:1, heron:2, pelican:2, seagull:1, magpie:1, raven:2, wren:1, chickadee:1, oriole:1, warbler:1, swan:2, duck:1, goose:2,
-  goldfish:1, bass:1, salmon:1, tuna:2, clownfish:1, catfish:1,
+  goldfish:1, bass:1, salmon:1, tuna:2, clownfish:1, catfish:1, shark:3, whaleshark:5,
   worm:1, gopher:2,
 };
 // Rough horizontal collision radius per species, used for entity-vs-entity collision below.
@@ -3654,6 +3654,11 @@ function updateBirds(dt){
 // real water depth (its bottom is the terrain, its top is SEA_LEVEL) rather than open space. If no
 // water happens to be within FISH_RADIUS of the player (deep inland) a fish just stays invisible until
 // one wanders into range, instead of popping up stranded on dry land.
+// size is a multiplier on buildFishMesh's total nose-to-tail length (0.48 local units: the 0.32-long
+// body plus the tail fin that extends further back off its own pivot) — so size 4.167 / 6.25 come out
+// to exactly 2 / 3 blocks long nose-to-tail. Big fish are deliberately rarer (count) and need deeper
+// water to swim in without clipping the sea floor or surface (minDepth) than the regular schooling
+// fish, which default to count:4 and minDepth:1.
 const FISH_SPECIES = [
   { id:'goldfish',   name:'Goldfish',   body:0xf0801a, accent:0xffe0a0, size:0.75 },
   { id:'bass',       name:'Bass',       body:0x5a7a5a, accent:0x2a3a2a, size:1.10 },
@@ -3661,8 +3666,10 @@ const FISH_SPECIES = [
   { id:'tuna',       name:'Tuna',       body:0x3a5a7a, accent:0xd8e0e8, size:1.30 },
   { id:'clownfish',  name:'Clownfish',  body:0xf0601a, accent:0xffffff, size:0.65 },
   { id:'catfish',    name:'Catfish',    body:0x6a5a4a, accent:0x4a3a2a, size:1.15 },
+  { id:'shark',      name:'Shark',      body:0x74828c, accent:0xe8ecec, size:4.167, count:2, hp:3, minDepth:2 },
+  { id:'whaleshark', name:'Whale Shark',body:0x2f4a5c, accent:0xcfe0e8, size:6.25,  count:1, hp:5, minDepth:3 },
 ];
-const FISH_COUNT = FISH_SPECIES.length * 4;
+const FISH_COUNT = FISH_SPECIES.reduce((sum,s)=>sum+(s.count||4), 0);
 const FISH_RADIUS = 26;
 const fish = [];
 const fishMatCache = new Map(); // species.id -> {body, accent} materials, shared across that species' instances
@@ -3717,18 +3724,18 @@ function buildFishMesh(species){
   g.traverse(o => { if(o.isMesh) o.castShadow = true; });
   return g;
 }
-function findFishSpot(){
+function findFishSpot(minDepth){
   for(let tries=0; tries<20; tries++){
     const ang = Math.random()*Math.PI*2, r = 4+Math.random()*(FISH_RADIUS-4);
     const x = Math.floor(player.pos.x + Math.cos(ang)*r);
     const z = Math.floor(player.pos.z + Math.sin(ang)*r);
     const h = heightAt(x,z);
-    if(h < SEA_LEVEL) return { x:x+0.5, z:z+0.5, bottom:h+1, top:SEA_LEVEL };
+    if(h < SEA_LEVEL && SEA_LEVEL-h >= (minDepth||1)) return { x:x+0.5, z:z+0.5, bottom:h+1, top:SEA_LEVEL };
   }
   return null;
 }
 function spawnFishHome(f){
-  const spot = findFishSpot();
+  const spot = findFishSpot(f.species.minDepth);
   if(!spot){ f.hasHome = false; f.mesh.visible = false; return; }
   f.hasHome = true; f.mesh.visible = true;
   f.bottom = spot.bottom; f.top = spot.top;
@@ -3746,13 +3753,15 @@ function spawnFishHome(f){
 }
 function ensureFish(){
   if(fish.length) return;
-  for(let i=0;i<FISH_COUNT;i++){
-    const species = FISH_SPECIES[i % FISH_SPECIES.length];
+  const speciesList = [];
+  for(const species of FISH_SPECIES) for(let i=0;i<(species.count||4);i++) speciesList.push(species);
+  for(const species of speciesList){
     const mesh = buildFishMesh(species);
     scene.add(mesh);
+    const hp = species.hp||1;
     const f = {
       mesh, species, homeX:0, homeZ:0, bottom:1, top:1, baseY:1, hasHome:false,
-      hp: 1, maxHp: 1,
+      hp, maxHp: hp,
       freqX: 0.2+Math.random()*0.3, freqZ: 0.2+Math.random()*0.3,
       ampXZ: 1.5+Math.random()*2.5, phase: Math.random()*Math.PI*2,
       vertPeriod: 6+Math.random()*10, vertPhase: Math.random()*Math.PI*2,
