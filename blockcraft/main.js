@@ -1468,8 +1468,8 @@ const ANIMAL_BUILDERS = {
       extras(g){
         const earL=animalBox(0.06,0.4,0.4,hide); earL.position.set(-0.28,1.2,-0.55); g.add(earL);
         const earR=animalBox(0.06,0.4,0.4,hide); earR.position.set(0.28,1.2,-0.55); g.add(earR);
-        const trunk=animalBox(0.14,0.55,0.14,hide);
-        trunk.geometry.translate(0,-0.275,0); trunk.position.set(0,1.3,-0.85); trunk.rotation.x=0.2; g.add(trunk);
+        const trunk=animalBox(0.14,0.85,0.14,hide);
+        trunk.geometry.translate(0,-0.425,0); trunk.position.set(0,1.3,-0.85); trunk.rotation.x=0.25; g.add(trunk);
         const tuskL=animalBox(0.05,0.05,0.22,0xf0ead6); tuskL.position.set(-0.12,0.95,-0.9); g.add(tuskL);
         const tuskR=animalBox(0.05,0.05,0.22,0xf0ead6); tuskR.position.set(0.12,0.95,-0.9); g.add(tuskR);
       },
@@ -3716,19 +3716,23 @@ function updateBirds(dt){
 }
 
 // ---------- Big Eagles: 2 apex predators that hunt other birds and fish ----------
-// Reuses the exact same bird model (buildBirdMesh) and home-point-recycling wander pattern as the
-// regular birds above, just scaled way up and with its own slower, more majestic wingbeat — same
-// "one model, differentiate by size/color" approach used for the big Shark/Whale Shark fish. Only 2
-// exist, ranging much further than a regular bird (BIG_EAGLE_RADIUS), and roughly once per in-game
-// day each one hunts down whatever bird or fish is currently nearest it and eats it — a clean kill,
-// no meat drop (see damageBirdOrFish's awardMeat flag: only a kill the player lands themselves ever
-// puts Meat in their inventory, same reasoning as birds eating worms below WORM_MIN_POPULATION_FOR_
-// PREDATION). They're themselves attackable and drop Meat like every other creature here.
+// Reuses the exact same bird model (buildBirdMesh) and home-point-recycling as the regular birds
+// above, just scaled way up and with its own slower, more majestic wingbeat — same "one model,
+// differentiate by size/color" approach used for the big Shark/Whale Shark fish. Unlike a regular
+// bird's Lissajous-ish drift, an eagle actually circles — a true closed loop around its home point,
+// the way a real bird of prey soars while scanning the ground — with the two eagles independently
+// randomized to circle clockwise or counterclockwise. Only 2 exist, ranging much further than a
+// regular bird (BIG_EAGLE_RADIUS). Roughly once per in-game day each one hunts down the 2 nearest
+// birds/fish within range and eats them — a clean kill, no meat drop (see damageBirdOrFish's
+// awardMeat flag: only a kill the player lands themselves ever puts Meat in their inventory, same
+// reasoning as birds eating worms below WORM_MIN_POPULATION_FOR_PREDATION). They're themselves
+// attackable and drop Meat like every other creature here.
 const BIG_EAGLE_COUNT = 2;
 const BIG_EAGLE_SPECIES = { id:'bigeagle', name:'Giant Eagle', body:0x4a3a2a, accent:0xe8dcc8, size:3.0, pitch:0.4 };
 const BIG_EAGLE_RADIUS = 40;
 const BIG_EAGLE_HUNT_INTERVAL_MS = DAY_LENGTH_S*1000; // once per in-game day
 const BIG_EAGLE_HUNT_RADIUS = 15;
+const BIG_EAGLE_PREY_PER_HUNT = 2; // eats double what it used to
 const bigEagles = [];
 function spawnBigEagleHome(e){
   const ang = Math.random()*Math.PI*2, r = 10+Math.random()*(BIG_EAGLE_RADIUS-10);
@@ -3751,8 +3755,12 @@ function ensureBigEagles(){
     const e = {
       mesh, species: BIG_EAGLE_SPECIES, homeX:0, homeZ:0, baseY:0,
       hp: 4, maxHp: 4,
-      freqX: 0.08+Math.random()*0.1, freqY: 0.2+Math.random()*0.2, freqZ: 0.08+Math.random()*0.1,
-      ampXZ: 10+Math.random()*8, ampY: 2+Math.random()*2, phase: Math.random()*Math.PI*2,
+      // A true circle around the home point — period 20-40s, independently clockwise or
+      // counterclockwise per eagle — plus a gentle independent bob in altitude.
+      circleRadius: 10+Math.random()*8,
+      angularSpeed: (Math.PI*2/(20+Math.random()*20)) * (Math.random()<0.5 ? 1 : -1),
+      anglePhase: Math.random()*Math.PI*2,
+      freqY: 0.15+Math.random()*0.1, ampY: 1.5+Math.random()*1.5, phaseY: Math.random()*Math.PI*2,
       flapPhase: Math.random()*Math.PI*2, flapSpeed: 4+Math.random()*2, // slower, more majestic than small birds
       // Staggered so the two eagles don't both hunt the instant the world loads.
       lastHuntAt: Date.now() - Math.random()*BIG_EAGLE_HUNT_INTERVAL_MS,
@@ -3776,12 +3784,15 @@ function updateBigEagles(dt){
 
     const dx = e.homeXTarget-player.pos.x, dz = e.homeZTarget-player.pos.z;
     if(dx*dx+dz*dz > BIG_EAGLE_RADIUS*BIG_EAGLE_RADIUS) spawnBigEagleHome(e);
-    const ax = t*e.freqX+e.phase, az = t*e.freqZ+e.phase*1.3, ay = t*e.freqY+e.phase*0.7;
-    const x = e.homeX + Math.sin(ax)*e.ampXZ;
-    const z = e.homeZ + Math.cos(az)*e.ampXZ;
-    const y = Math.max(4, e.baseY + Math.sin(ay)*e.ampY);
+
+    const angle = t*e.angularSpeed + e.anglePhase;
+    const x = e.homeX + Math.cos(angle)*e.circleRadius;
+    const z = e.homeZ + Math.sin(angle)*e.circleRadius;
+    const y = Math.max(4, e.baseY + Math.sin(t*e.freqY+e.phaseY)*e.ampY);
     e.mesh.position.set(x,y,z);
-    const vx = Math.cos(ax)*e.freqX*e.ampXZ, vz = -Math.sin(az)*e.freqZ*e.ampXZ;
+    // Face the direction of travel along the circle — the analytic tangent of (cos,sin)(angle) —
+    // same atan2(-vx,-vz) convention used everywhere else in this file.
+    const vx = -Math.sin(angle)*e.angularSpeed, vz = Math.cos(angle)*e.angularSpeed;
     if(vx*vx+vz*vz > 0.0001) e.mesh.rotation.y = Math.atan2(-vx,-vz);
 
     e.flapPhase += dt*e.flapSpeed;
@@ -3789,20 +3800,22 @@ function updateBigEagles(dt){
     for(const wingPivot of e.mesh.userData.wings) wingPivot.rotation.z = wingPivot.userData.side*flap;
 
     if(now - e.lastHuntAt >= BIG_EAGLE_HUNT_INTERVAL_MS){
-      let nearest = null, nearestType = null, bestD2 = BIG_EAGLE_HUNT_RADIUS*BIG_EAGLE_HUNT_RADIUS;
+      const candidates = [];
       for(const b of birds){
         const bdx=b.mesh.position.x-x, bdy=b.mesh.position.y-y, bdz=b.mesh.position.z-z;
         const d2 = bdx*bdx+bdy*bdy+bdz*bdz;
-        if(d2<bestD2){ nearest=b; nearestType='bird'; bestD2=d2; }
+        if(d2 < BIG_EAGLE_HUNT_RADIUS*BIG_EAGLE_HUNT_RADIUS) candidates.push({ref:b, type:'bird', d2});
       }
       for(const f of fish){
         const fdx=f.mesh.position.x-x, fdy=f.mesh.position.y-y, fdz=f.mesh.position.z-z;
         const d2 = fdx*fdx+fdy*fdy+fdz*fdz;
-        if(d2<bestD2){ nearest=f; nearestType='fish'; bestD2=d2; }
+        if(d2 < BIG_EAGLE_HUNT_RADIUS*BIG_EAGLE_HUNT_RADIUS) candidates.push({ref:f, type:'fish', d2});
       }
-      if(nearest){
+      candidates.sort((a,b)=>a.d2-b.d2);
+      const prey = candidates.slice(0, BIG_EAGLE_PREY_PER_HUNT);
+      if(prey.length){
         e.lastHuntAt = now;
-        damageBirdOrFish(nearest, nearest.hp, nearestType, false);
+        for(const c of prey) damageBirdOrFish(c.ref, c.ref.hp, c.type, false);
       }
     }
   }
