@@ -2173,6 +2173,7 @@ function applyWorldEdit(x,y,z,val,fromRemote){
   if(val===CRAFTING_TABLE) craftingTables.add(k); else craftingTables.delete(k);
   updateTorchLight(x,y,z,val);
   onBlockChanged(x,y,z);
+  onWaterRelevantEdit(x,y,z,val);
   saveEdits();
   if(!fromRemote && fbReady) db.ref('world/edits/'+k).set(val);
 }
@@ -4026,6 +4027,78 @@ function removeFireFx(key){
   if(fx){ scene.remove(fx.light); scene.remove(fx.flame); fireFx.delete(key); }
 }
 
+// ---------- Water flow: water spreads into adjacent empty gaps/holes over time ----------
+// Not a full per-tick fluid simulation across the whole world (way too expensive at this world size,
+// and the initial ocean is already "settled" from world-gen — it doesn't need to re-simulate itself
+// on load). Instead this is purely reactive and queue-driven: applyWorldEdit calls onWaterRelevantEdit
+// below for every edit, and any block breaking (a fresh AIR gap) or water being placed queues the
+// cells right around it as flow candidates. Each tick drains a few entries off that queue; a candidate
+// that's still empty AND still has a water neighbor becomes water itself and queues its own downstream
+// neighbors in turn — so a flow cascades outward exactly like water finding its way into a freshly-dug
+// hole, a visible trickle at a time rather than an instant fill. A per-tick rate cap and a max BFS
+// distance from the triggering edit keep a tunnel dug next to the ocean from flooding the whole map at
+// once. Every client runs this independently off the same synced edits (same client-authoritative, no-
+// transactions approach as blocks/fires/saplings elsewhere), so everyone ends up seeing the same flow.
+const WATER_FLOW_TICK_S = 0.35;      // how often the flow queue drains
+const WATER_FLOW_PER_TICK = 5;       // cells filled per tick — a visible trickle, not instant
+const WATER_FLOW_MAX_DIST = 14;      // how far (BFS hops) one flow event can travel from its trigger
+// Water only ever spreads down or sideways, never up — a hole dug directly under a lake shouldn't pull
+// water out of thin air above it. These two offset lists are deliberately NOT the same set, even
+// though they look like they should mirror each other: WATER_SPREAD_OFFSETS is "which of MY neighbors
+// might I now be able to reach" (asked by a cell that just became water, so down + sideways); a
+// candidate cell's eligibility question is the inverse along the vertical axis — "is there water
+// positioned such that it could reach ME" is true if water sits directly ABOVE me (it can drip down)
+// or beside me (it can spread sideways), but never if water is merely below me (that would mean water
+// flowing upward into me, which real fluid never does).
+const WATER_SPREAD_OFFSETS = [[0,-1,0],[1,0,0],[-1,0,0],[0,0,1],[0,0,-1]];
+const WATER_NEIGHBOR_OFFSETS = [[0,1,0],[1,0,0],[-1,0,0],[0,0,1],[0,0,-1]];
+const waterFlowQueue = [];         // [{x,y,z,dist}]
+const waterFlowQueued = new Set(); // dedupe key "x,y,z", mirrors what's currently queued
+function hasWaterNeighbor(x,y,z){
+  for(const [dx,dy,dz] of WATER_NEIGHBOR_OFFSETS) if(getBlock(x+dx,y+dy,z+dz)===WATER) return true;
+  return false;
+}
+function enqueueWaterFlow(x,y,z,dist){
+  if(getBlock(x,y,z)!==AIR) return;
+  const key = x+','+y+','+z;
+  if(waterFlowQueued.has(key)) return;
+  waterFlowQueued.add(key);
+  waterFlowQueue.push({x,y,z,dist});
+}
+// Only reacts to a cell turning to AIR (a fresh gap next to water). Deliberately does NOT also react
+// to val===WATER here: applyWorldEdit calls this for every edit including the flow system's own
+// fills, and reseeding dist=1 every time a fill happens would silently defeat WATER_FLOW_MAX_DIST —
+// every new cell would re-announce itself as a fresh distance-1 source forever, so a flow could never
+// actually run out of distance budget as long as it kept finding new empty neighbors. updateWaterFlow's
+// own explicit dist+1 propagation below is the sole mechanism for cascading a flow forward; placeBlock
+// separately calls seedWaterFlowFromPlacement for a genuinely new player-placed water source.
+function onWaterRelevantEdit(x,y,z,val){
+  if(val===AIR && hasWaterNeighbor(x,y,z)) enqueueWaterFlow(x,y,z,1);
+}
+// Called once, directly, when a player places a water block — gives its empty neighbors a fresh
+// distance-1 source to spread from, same as if a gap had just opened up next to existing water.
+function seedWaterFlowFromPlacement(x,y,z){
+  for(const [dx,dy,dz] of WATER_SPREAD_OFFSETS) enqueueWaterFlow(x+dx,y+dy,z+dz,1);
+}
+let waterFlowTimer = 0;
+function updateWaterFlow(dt){
+  waterFlowTimer -= dt;
+  if(waterFlowTimer>0) return;
+  waterFlowTimer = WATER_FLOW_TICK_S;
+  let filled = 0;
+  while(filled<WATER_FLOW_PER_TICK && waterFlowQueue.length){
+    const cell = waterFlowQueue.shift();
+    waterFlowQueued.delete(cell.x+','+cell.y+','+cell.z);
+    if(getBlock(cell.x,cell.y,cell.z)!==AIR) continue; // no longer empty — built on, or already filled
+    if(!hasWaterNeighbor(cell.x,cell.y,cell.z)) continue; // stale — its water neighbor is gone now
+    applyWorldEdit(cell.x,cell.y,cell.z,WATER,false);
+    filled++;
+    if(cell.dist<WATER_FLOW_MAX_DIST){
+      for(const [dx,dy,dz] of WATER_SPREAD_OFFSETS) enqueueWaterFlow(cell.x+dx,cell.y+dy,cell.z+dz,cell.dist+1);
+    }
+  }
+}
+
 // ---------- Fireworks: unlimited, purely a fun effect — no crafting, never consumed ----------
 // A small rocket climbs straight up from wherever you're standing, then blooms into an evenly-
 // spaced spherical shower of colored sparks (a fibonacci-sphere point distribution, which reads as
@@ -4678,6 +4751,7 @@ function placeBlock(){
   if(invCount(block)<=0) return;
   if(playerOverlapsCell(x,y,z)) return;
   applyWorldEdit(x, y, z, block, false);
+  if(block===WATER) seedWaterFlowFromPlacement(x, y, z);
   invSub(block,1);
   saveInventory();
   updateHotbarUI();
@@ -4719,7 +4793,7 @@ window.addEventListener('keydown', e=>{
   }
   if(e.code==='KeyV' && locked){ thirdPerson = !thirdPerson; return; }
   if(e.code==='KeyN' && locked){ cycleTimeMode(); return; }
-  if(e.code==='KeyZ' && locked){ player.crawlMode = !player.crawlMode; return; }
+  if(e.code==='KeyL' && locked){ player.crawlMode = !player.crawlMode; return; }
   if(e.code==='Enter'){
     // Chat itself is focused while typing, so its own keydown listener (stopPropagation) handles
     // Enter-to-send/Escape-to-cancel from here on — this only ever fires the "not open yet" case.
@@ -5311,6 +5385,7 @@ function animate(now){
   updateSaplings(dt);
   updateTreeRegrowth(dt);
   updateFires(dt);
+  updateWaterFlow(dt);
   updateFireworks(dt);
   updateFireflies(dt);
   updateWorms(dt);
