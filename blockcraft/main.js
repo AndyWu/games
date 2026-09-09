@@ -2693,9 +2693,9 @@ function updateFireflies(dt){
 }
 
 // ---------- Worms: slowly eat tree leaves, breed, turn into butterflies, and can be burned to death ----------
-// A single worm spawns on the world's trees the first time anyone loads a world. Every 2 in-game
+// A single worm spawns on the world's trees the first time anyone loads a world. Every 0.4 in-game
 // hours (Blockcraft's clock, not the wall clock — DAY_LENGTH_S real seconds is a full 24-hour
-// in-game day, so this works out to DAY_LENGTH_S/12 real seconds) each worm eats the nearest leaf
+// in-game day, so this works out to DAY_LENGTH_S/60 real seconds) each worm eats the nearest leaf
 // block within reach (a genuine world edit — synced/persisted like any other block change, so
 // everyone sees the same tree thin out); every 1 in-game hour (DAY_LENGTH_S/24 real seconds) it has
 // 2 children nearby. Population is capped so an unattended world can't grow it forever. Standing in
@@ -2712,7 +2712,7 @@ function updateFireflies(dt){
 // the eat/reproduce checks against those shared timestamps, same client-authoritative, no-transactions
 // approach already used for block edits/saplings/fires elsewhere in this file. In solo/offline play
 // (no Firebase), worms fall back to the old purely-local, resets-on-reload behavior.
-const WORM_EAT_INTERVAL_MS = DAY_LENGTH_S*1000 * (2/24); // one leaf block every 2 in-game hours
+const WORM_EAT_INTERVAL_MS = DAY_LENGTH_S*1000 * (2/24) / 5; // one leaf block every 0.4 in-game hours (5x the original 2)
 const WORM_REPRODUCE_INTERVAL_MS = DAY_LENGTH_S*1000 * (1/24); // 2 children every 1 in-game hour
 const WORM_CHILDREN_PER_REPRODUCE = 2;
 const WORM_MAX_POPULATION = 100;
