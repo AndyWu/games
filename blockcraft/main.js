@@ -2913,8 +2913,27 @@ const WORM_CHILDREN_PER_REPRODUCE = 2;
 const WORM_MAX_POPULATION = 100;
 const WORM_SEARCH_RADIUS = 6;
 const WORM_BUTTERFLY_THRESHOLD = 100; // leaves eaten (lifetime) before a worm becomes a butterfly
+// A worm needs real physical support underneath it — it lives either nested inside a leaf cell (the
+// same spot the eat cycle above teleports it into, which is also exactly the leaf it just bit into,
+// so eating routinely leaves it standing on thin air) or resting on solid ground. If neither is true —
+// its leaf got eaten out from under it, a baby spawned at an offset with nothing there, or its tree
+// got chopped down — it falls straight down like anything else in this world, lands on the ground,
+// and then wanders in search of the nearest tree to climb back into (the existing eat cycle, once a
+// leaf comes within its normal WORM_SEARCH_RADIUS, does the actual "climbing back in").
+const WORM_FALL_SPEED = 3;               // blocks/sec while falling
+const WORM_GROUND_SEARCH_RADIUS = 12;    // how far a grounded worm looks for a tree to head toward
+const WORM_GROUND_SEARCH_INTERVAL_S = 3; // how often a grounded worm re-checks for one
+const WORM_WALK_SPEED = 0.5;             // slow crawl while searching on open ground
 const worms = [];
 let wormGeo, wormMat;
+// Returns the worm's settled y if (x,y,z) is currently supported — nested inside a leaf cell, or
+// resting on solid ground directly beneath it — or null if there's nothing holding it up.
+function wormRestY(x,y,z){
+  const bx=Math.floor(x), by=Math.floor(y), bz=Math.floor(z);
+  if(getBlock(bx,by,bz)===LEAVES) return by+0.25;
+  if(blockSolid(bx,by-1,bz)) return by+0.1;
+  return null;
+}
 function findNearestLeaf(cx,cy,cz,radius){
   let best=null, bestD2=Infinity;
   const r = Math.ceil(radius), r2 = radius*radius;
@@ -3004,6 +3023,42 @@ function updateWorms(dt){
     if(dist<0.4 && player.pos.y<=w.y && player.pos.y+player.height>=w.y){
       killWorm(w, 'squashed');
       continue;
+    }
+
+    // Physical support: fall if there's nothing beneath (its leaf just got eaten, its tree got
+    // chopped, or it spawned at an offset with nothing there), then hunt for a tree once grounded.
+    let falling = false;
+    const restY = wormRestY(w.x, w.y, w.z);
+    if(restY===null){
+      falling = true;
+      w.y -= WORM_FALL_SPEED*dt;
+      const landedY = wormRestY(w.x, w.y, w.z);
+      if(landedY!==null){ w.y = landedY; falling = false; }
+    } else {
+      w.y = restY;
+    }
+
+    if(!falling && getBlock(Math.floor(w.x), Math.floor(w.y), Math.floor(w.z))!==LEAVES){
+      // Grounded but not on a tree — periodically look for one and slowly crawl toward it.
+      w.groundSearchTimer = (w.groundSearchTimer||0) - dt;
+      if(w.groundSearchTimer<=0){
+        w.groundSearchTimer = WORM_GROUND_SEARCH_INTERVAL_S + Math.random();
+        const leaf = findNearestLeaf(w.x, w.y, w.z, WORM_GROUND_SEARCH_RADIUS);
+        if(leaf){ w.wanderX = leaf.x+0.5; w.wanderZ = leaf.z+0.5; }
+        else { const ang = Math.random()*Math.PI*2; w.wanderX = w.x+Math.cos(ang)*4; w.wanderZ = w.z+Math.sin(ang)*4; }
+      }
+      if(w.wanderX!=null){
+        const wdx = w.wanderX-w.x, wdz = w.wanderZ-w.z, wd = Math.hypot(wdx,wdz);
+        if(wd>0.2){
+          const step = Math.min(WORM_WALK_SPEED*dt, wd);
+          w.x += wdx/wd*step; w.z += wdz/wd*step;
+        }
+      }
+    }
+
+    if(falling){
+      w.mesh.position.set(w.x, w.y, w.z);
+      continue; // skip eating/reproducing while it's still falling
     }
 
     if(now - w.lastAteAt >= WORM_EAT_INTERVAL_MS){
