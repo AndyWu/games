@@ -2949,18 +2949,19 @@ function createWorm(x,y,z){
   }
   return w;
 }
-function killWorm(w, fromRemote){
+function killWorm(w, reason){
   scene.remove(w.mesh);
   const i = worms.indexOf(w);
   if(i>=0) worms.splice(i,1);
-  if(!fromRemote){
-    // Drop meat when a worm is squashed by the player (not from fire/remote deletion)
+  if(reason==='squashed'){
+    // Only the player directly squashing a worm awards meat — burning, aging into a butterfly, a
+    // bird eating it, or a remote deletion syncing in from another client never do.
     invAdd(MEAT, MEAT_YIELD.worm || 1);
     saveInventory();
     updateHotbarUI();
     SFX.animalDeath();
   }
-  if(!fromRemote && fbReady) db.ref('world/worms/'+w.id).remove();
+  if(reason!=='remote' && fbReady) db.ref('world/worms/'+w.id).remove();
 }
 function updateWorms(dt){
   const now = Date.now();
@@ -2971,13 +2972,13 @@ function updateWorms(dt){
       const [fx,fy,fz] = key.split(',').map(Number);
       if(Math.floor(w.x)===fx && Math.floor(w.y)===fy && Math.floor(w.z)===fz){ burned = true; break; }
     }
-    if(burned){ killWorm(w); continue; }
+    if(burned){ killWorm(w, 'burned'); continue; }
 
     // Squash worm if player steps on it
     const dx = w.x - player.pos.x, dz = w.z - player.pos.z;
     const dist = Math.hypot(dx, dz);
     if(dist<0.4 && player.pos.y<=w.y && player.pos.y+player.height>=w.y){
-      killWorm(w);
+      killWorm(w, 'squashed');
       continue;
     }
 
@@ -2996,7 +2997,7 @@ function updateWorms(dt){
       }
       if(w.eatenCount>=WORM_BUTTERFLY_THRESHOLD){
         const bx=Math.floor(w.x), by=Math.floor(w.y), bz=Math.floor(w.z);
-        killWorm(w);
+        killWorm(w, 'butterfly');
         createButterfly(bx,by,bz);
         continue;
       }
@@ -3418,6 +3419,12 @@ const BIRD_SPECIES = [
 const BIRD_COUNT = BIRD_SPECIES.length * 2;
 const BIRD_RADIUS = 32; // recycle a bird's home once it's this far (x/z) from the player
 const BIRD_EARSHOT_RADIUS = 20; // only a bird within this many blocks of the player is ever heard
+// Birds occasionally snack on nearby worms — but only once the worm population is healthy (>=
+// WORM_MIN_POPULATION_FOR_PREDATION), so birds can't ever hunt worms to extinction. A worm eaten
+// this way is just gone (no meat drop — the bird ate it, not the player).
+const BIRD_EAT_WORM_INTERVAL_S = 6; // how often each bird checks for a nearby worm to eat
+const BIRD_EAT_WORM_RADIUS = 3; // how close a worm needs to be to the bird's current position
+const WORM_MIN_POPULATION_FOR_PREDATION = 10;
 const birds = [];
 const birdMatCache = new Map(); // species.id -> {body, accent} materials, shared across that species' instances
 const birdBeakMat = new THREE.MeshLambertMaterial({ color: 0xe8a83d });
@@ -3502,6 +3509,7 @@ function ensureBirds(){
       freqX: 0.15+Math.random()*0.2, freqY: 0.4+Math.random()*0.5, freqZ: 0.15+Math.random()*0.2,
       ampXZ: 5+Math.random()*7, ampY: 1+Math.random()*1.5, phase: Math.random()*Math.PI*2,
       tweetTimer: 2+Math.random()*8, flapPhase: Math.random()*Math.PI*2, flapSpeed: 9+Math.random()*4,
+      eatWormTimer: Math.random()*BIRD_EAT_WORM_INTERVAL_S,
     };
     spawnBirdHome(b);
     birds.push(b);
@@ -3541,6 +3549,20 @@ function updateBirds(dt){
       b.tweetTimer = 4+Math.random()*8;
       const dist = Math.hypot(x-player.pos.x, y-(player.pos.y+player.eye), z-player.pos.z);
       if(dist < BIRD_EARSHOT_RADIUS) SFX.birdTweet(b.species.pitch, Math.max(0,1-dist/BIRD_EARSHOT_RADIUS)*0.13);
+    }
+
+    b.eatWormTimer -= dt;
+    if(b.eatWormTimer<=0){
+      b.eatWormTimer = BIRD_EAT_WORM_INTERVAL_S*0.5 + Math.random()*BIRD_EAT_WORM_INTERVAL_S;
+      if(worms.length >= WORM_MIN_POPULATION_FOR_PREDATION){
+        let nearest = null, bestD2 = BIRD_EAT_WORM_RADIUS*BIRD_EAT_WORM_RADIUS;
+        for(const w of worms){
+          const wdx = w.x-x, wdy = w.y-y, wdz = w.z-z;
+          const d2 = wdx*wdx+wdy*wdy+wdz*wdz;
+          if(d2<bestD2){ nearest = w; bestD2 = d2; }
+        }
+        if(nearest) killWorm(nearest, 'eaten');
+      }
     }
   }
 }
@@ -4172,7 +4194,7 @@ function initMultiplayer(){
     });
     db.ref('world/worms').on('child_removed', snap=>{
       const w = worms.find(w=>w.id===snap.key);
-      if(w) killWorm(w, true);
+      if(w) killWorm(w, 'remote');
     });
     // Nobody's created the first worm for this shared world yet — do it once, the same "first client
     // in wins" approach the rest of this file relies on rather than a transaction.
