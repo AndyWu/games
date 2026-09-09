@@ -1128,6 +1128,7 @@ function updateMinimap(){
 
 // ---------- Player ----------
 const GRAVITY = -28, JUMP_SPEED = 9, WALK_SPEED = 5.2, SPRINT_SPEED = 8.4, LADDER_CLIMB_SPEED = 4, SWIM_SPEED = 3.5;
+const WATER_SINK_SPEED = 1.2; // gentle default sink in water when not actively holding Space to stay up
 // Hold Ctrl to crawl: drops to a much shorter hitbox (comfortably under 1 block, so a 1-tall gap with
 // solid floor and ceiling actually clears it) and moves slower, same "hold a modifier key" feel as
 // sprint. player.height/eye shrink to these while crawling and pop back to PLAYER_HEIGHT/PLAYER_EYE
@@ -4621,10 +4622,12 @@ function updatePlayer(dt){
     else if(keys['KeyS']) climbY = -LADDER_CLIMB_SPEED;
     player.vel.y = climbY;
   } else if(inWater){
-    // Same shape as ladder climbing — hold W/Space to swim up, S to swim down, let go to float in
-    // place instead of sinking or gravity taking back over.
-    let swimY = 0;
-    if(keys['KeyW'] || keys['Space']) swimY = SWIM_SPEED;
+    // Only Space actively swims up (not W) — W/A/S/D stay purely horizontal in water, same as on
+    // land. Letting go sinks gently by default rather than holding position, so simply holding W to
+    // cross a lake no longer keeps you pinned at the surface for free the whole way across; staying
+    // up takes actually holding Space, the same way real swimming does. S swims down faster still.
+    let swimY = -WATER_SINK_SPEED;
+    if(keys['Space']) swimY = SWIM_SPEED;
     else if(keys['KeyS']) swimY = -SWIM_SPEED;
     player.vel.y = swimY;
   } else {
