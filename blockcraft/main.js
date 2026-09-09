@@ -133,12 +133,16 @@ const ANIMAL_REAL_HEIGHT = {
 const MEAT_YIELD = { dog:1, sheep:1, lion:2, cow:2, giraffe:3, elephant:4,
   robin:1, sparrow:1, blue_jay:1, cardinal:1, crow:2, bluebird:1, finch:1, swallow:1, dove:1, woodpecker:1, owl:2, hawk:2, eagle:2, parrot:1, toucan:1, flamingo:2, hummingbird:1, kingfisher:1, heron:2, pelican:2, seagull:1, magpie:1, raven:2, wren:1, chickadee:1, oriole:1, warbler:1, swan:2, duck:1, goose:2,
   goldfish:1, bass:1, salmon:1, tuna:2, clownfish:1, catfish:1,
-  worm:1,
+  worm:1, gopher:2,
 };
 // Rough horizontal collision radius per species, used for entity-vs-entity collision below.
 const ANIMAL_RADIUS = {
   sheep: 0.35, dog: 0.22, cow: 0.5, giraffe: 0.5, lion: 0.4, elephant: 0.95,
 };
+// Reproduction mechanics: animals reproduce when two of the same species meet
+// Cooldown: 30 in-game days (30 * DAY_LENGTH_S * 1000 ms)
+const ANIMAL_REPRODUCE_INTERVAL_MS = 30 * DAY_LENGTH_S * 1000;
+const ANIMAL_REPRODUCE_RANGE = 2.0; // how close animals need to be to reproduce
 
 // ---------- Crafting ----------
 const RECIPES = [
@@ -1111,7 +1115,7 @@ const player = {
   pos: new THREE.Vector3(0,0,0),
   vel: new THREE.Vector3(0,0,0),
   yaw: 0, pitch: 0, onGround: false, crawling: false, inWater: false,
-  canDoubleJump: false, spaceWasDown: false,
+  canDoubleJump: false, spaceWasDown: false, crawlMode: false,
   width: 0.6, height: PLAYER_HEIGHT, eye: PLAYER_EYE,
 };
 // 10 fixed spawn points spread across the map, as fractions of WORLD_SIZE so they scale with it.
@@ -1506,6 +1510,7 @@ function addAnimal(type, id, spot, yawSeed){
     x:spot.x+0.5, y:gy, z:spot.z+0.5, yaw: (yawSeed!=null ? yawSeed : Math.random())*Math.PI*2,
     wanderTimer: Math.random()*2, target:null,
     aggroUntil:0, attackCooldown:0, walk:{phase:0,amp:0}, wasAggro:false,
+    lastReproducedAt: Date.now(),
   };
   animals.push(a);
   return a;
@@ -1591,6 +1596,23 @@ function updateAnimal(a, dt){
   a.mesh.position.set(a.x, a.y, a.z);
   a.mesh.rotation.y = a.yaw;
   animateQuadrupedWalk(a.mesh, a.walk, dt, moving, isAggro?1.6:1);
+
+  // Reproduction: check for nearby animals of the same type
+  const nowMs = Date.now();
+  if(nowMs - a.lastReproducedAt >= ANIMAL_REPRODUCE_INTERVAL_MS){
+    for(const other of animals){
+      if(other.type!==a.type || other===a) continue;
+      const dx = other.x-a.x, dz = other.z-a.z;
+      if(Math.hypot(dx,dz) < ANIMAL_REPRODUCE_RANGE){
+        a.lastReproducedAt = nowMs;
+        other.lastReproducedAt = nowMs; // both animals just reproduced
+        // Spawn a baby animal at the midpoint
+        const babyX = (a.x+other.x)/2, babyZ = (a.z+other.z)/2;
+        addAnimal(a.type, newRespawnId(a.type), {x:babyX,z:babyZ});
+        break; // one reproduction per update pass per animal
+      }
+    }
+  }
 }
 function updateAnimals(dt){ animals.forEach(a=>updateAnimal(a,dt)); }
 function killAnimal(a){
@@ -1626,6 +1648,18 @@ function damageBirdOrFish(entity, dmg, type){
     const arr = type==='bird' ? birds : fish;
     const idx = arr.indexOf(entity);
     if(idx>=0) arr.splice(idx, 1);
+  }
+}
+function damageGopher(gopher, dmg){
+  gopher.hp = Math.max(0, gopher.hp - dmg);
+  if(gopher.hp<=0){
+    SFX.animalDeath();
+    invAdd(MEAT, MEAT_YIELD.gopher || 2);
+    saveInventory();
+    updateHotbarUI();
+    scene.remove(gopher.mesh);
+    const idx = gophers.indexOf(gopher);
+    if(idx>=0) gophers.splice(idx, 1);
   }
 }
 function applyRemoteMobHp(id, hp){
@@ -2003,6 +2037,13 @@ function findAttackTarget(){
     const dot = (dx/dist)*dir.x + (dy/dist)*dir.y + (dz/dist)*dir.z;
     if(dot>ATTACK_ANGLE_COS){ best = {type:'fish', ref:f}; bestDist = dist; }
   });
+  gophers.forEach(gopher=>{
+    const dx=gopher.mesh.position.x-origin.x, dy=(gopher.mesh.position.y)-origin.y, dz=gopher.mesh.position.z-origin.z;
+    const dist = Math.hypot(dx,dy,dz);
+    if(dist>ATTACK_RANGE || dist>=bestDist) return;
+    const dot = (dx/dist)*dir.x + (dy/dist)*dir.y + (dz/dist)*dir.z;
+    if(dot>ATTACK_ANGLE_COS){ best = {type:'gopher', ref:gopher}; bestDist = dist; }
+  });
   remotePlayers.forEach((e,id)=>{
     const dx=e.mesh.position.x-origin.x, dy=(e.mesh.position.y+1.0)-origin.y, dz=e.mesh.position.z-origin.z;
     const dist = Math.hypot(dx,dy,dz);
@@ -2031,6 +2072,7 @@ function tryAttack(){
     if(target.type==='animal') damageAnimal(target.ref, PLAYER_ATTACK_DMG);
     else if(target.type==='bird') damageBirdOrFish(target.ref, PLAYER_ATTACK_DMG, 'bird');
     else if(target.type==='fish') damageBirdOrFish(target.ref, PLAYER_ATTACK_DMG, 'fish');
+    else if(target.type==='gopher') damageGopher(target.ref, PLAYER_ATTACK_DMG);
     else damageRemotePlayer(target.id, target.ref, PLAYER_ATTACK_DMG);
   }
   return true;
@@ -2968,6 +3010,108 @@ function updateWorms(dt){
     }
     w.mesh.position.set(w.x, w.y + Math.sin(t*1.5+w.phase)*0.04, w.z);
     w.mesh.rotation.y = Math.sin(t*0.3+w.phase)*0.6;
+  }
+}
+
+// ---------- Gophers: dig tunnels underground ----------
+// Gophers spawn underground and slowly dig tunnels through dirt, creating passages large enough
+// for the player to crawl through (2 blocks wide, 2 blocks high).
+const GOPHER_COUNT = 4;
+const GOPHER_RADIUS = 40; // recycle a gopher's home once it's this far from player
+const gophers = [];
+function buildGopherMesh(){
+  const g = new THREE.Group();
+  const mat = new THREE.MeshLambertMaterial({ color: 0x7a6a5a });
+  // Simple gopher body: rounded mound shape
+  const body = new THREE.Mesh(new THREE.SphereGeometry(0.3, 6, 6), mat);
+  body.scale.set(1.2, 0.7, 1.4);
+  body.castShadow = true;
+  g.add(body);
+  // Two small ears
+  for(const side of [1,-1]){
+    const ear = new THREE.Mesh(new THREE.SphereGeometry(0.1, 4, 4), mat);
+    ear.position.set(side*0.2, 0.25, -0.15);
+    ear.castShadow = true;
+    g.add(ear);
+  }
+  return g;
+}
+function findUndergroundSpot(){
+  // Find a spot 4-8 blocks underground with mostly dirt around it
+  for(let tries=0; tries<40; tries++){
+    const ang = Math.random()*Math.PI*2, r = 3+Math.random()*(GOPHER_RADIUS-3);
+    const x = Math.floor(player.pos.x + Math.cos(ang)*r);
+    const z = Math.floor(player.pos.z + Math.sin(ang)*r);
+    const h = heightAt(x,z);
+    const y = Math.max(3, h - 4 - Math.floor(Math.random()*4)); // 4-8 blocks below surface
+    if(y<3) continue;
+    // Check if there's enough dirt around
+    let dirtCount = 0;
+    for(let dy=-1; dy<=1; dy++) for(let dx=-1; dx<=1; dx++) for(let dz=-1; dz<=1; dz++){
+      const b = getBlock(x+dx, y+dy, z+dz);
+      if(b===DIRT || b===GRASS) dirtCount++;
+    }
+    if(dirtCount>=15) return { x:x+0.5, y:y+0.5, z:z+0.5 };
+  }
+  return null;
+}
+function spawnGopherHome(g){
+  const spot = findUndergroundSpot();
+  if(!spot){ g.mesh.visible = false; return; }
+  g.mesh.visible = true;
+  g.homeX = spot.x; g.homeY = spot.y; g.homeZ = spot.z;
+  g.digTimer = 1+Math.random()*2; // time before digging next block
+}
+function ensureGophers(){
+  if(gophers.length) return;
+  for(let i=0; i<GOPHER_COUNT; i++){
+    const mesh = buildGopherMesh();
+    scene.add(mesh);
+    const g = {
+      mesh, hp:3, maxHp:3,
+      homeX:0, homeY:0, homeZ:0,
+      digTimer:0, digSpeed:0.3, wanderTimer:0,
+    };
+    spawnGopherHome(g);
+    gophers.push(g);
+  }
+}
+function updateGophers(dt){
+  ensureGophers();
+  for(const g of gophers){
+    if(!g.mesh.visible) spawnGopherHome(g);
+    if(!g.mesh.visible) continue;
+
+    const dx = g.homeX-player.pos.x, dz = g.homeZ-player.pos.z;
+    if(dx*dx+dz*dz > GOPHER_RADIUS*GOPHER_RADIUS) spawnGopherHome(g);
+
+    // Slow underground wandering + digging
+    g.wanderTimer -= dt;
+    if(g.wanderTimer<=0){
+      g.wanderTimer = 2+Math.random()*3;
+      // Pick a random direction to wander
+      const ang = Math.random()*Math.PI*2;
+      g.wanderX = Math.cos(ang)*0.5; g.wanderY = (Math.random()-0.5)*0.3; g.wanderZ = Math.sin(ang)*0.5;
+    }
+    g.homeX += g.wanderX*g.digSpeed*dt;
+    g.homeY += g.wanderY*g.digSpeed*dt;
+    g.homeZ += g.wanderZ*g.digSpeed*dt;
+
+    g.digTimer -= dt;
+    if(g.digTimer<=0){
+      g.digTimer = 1+Math.random()*2;
+      // Dig a small tunnel (2x2x2) around the gopher
+      const cx = Math.floor(g.homeX), cy = Math.floor(g.homeY), cz = Math.floor(g.homeZ);
+      for(let dy=-1; dy<=0; dy++) for(let dx=-1; dx<=0; dx++) for(let dz=-1; dz<=0; dz++){
+        const x = cx+dx, y = cy+dy, z = cz+dz;
+        const b = getBlock(x,y,z);
+        if(b===DIRT || b===GRASS){
+          applyWorldEdit(x, y, z, AIR, false);
+        }
+      }
+    }
+
+    g.mesh.position.set(g.homeX, g.homeY, g.homeZ);
   }
 }
 
@@ -4226,7 +4370,7 @@ function updatePlayer(dt){
   const len = Math.hypot(mx,mz);
   if(len>0){ mx/=len; mz/=len; }
 
-  player.crawling = !!(keys['ControlLeft']||keys['ControlRight']);
+  player.crawling = player.crawlMode || !!(keys['ControlLeft']||keys['ControlRight']);
   player.height = player.crawling ? CRAWL_HEIGHT : PLAYER_HEIGHT;
   player.eye = player.crawling ? CRAWL_EYE : PLAYER_EYE;
   const speed = player.crawling ? CRAWL_SPEED : (keys['ShiftLeft']||keys['ShiftRight']) ? SPRINT_SPEED : WALK_SPEED;
@@ -4482,6 +4626,7 @@ window.addEventListener('keydown', e=>{
   }
   if(e.code==='KeyV' && locked){ thirdPerson = !thirdPerson; return; }
   if(e.code==='KeyN' && locked){ cycleTimeMode(); return; }
+  if(e.code==='KeyZ' && locked){ player.crawlMode = !player.crawlMode; return; }
   if(e.code==='Enter'){
     // Chat itself is focused while typing, so its own keydown listener (stopPropagation) handles
     // Enter-to-send/Escape-to-cancel from here on — this only ever fires the "not open yet" case.
@@ -5079,6 +5224,7 @@ function animate(now){
   updateGhost(dt);
   updateBirds(dt);
   updateFish(dt);
+  updateGophers(dt);
   heldTorchLight.visible = HOTBAR[selectedSlot]===TORCH;
   if(heldTorchLight.visible) heldTorchLight.intensity = 1.0 + Math.random()*0.3;
   updateDayNight();
