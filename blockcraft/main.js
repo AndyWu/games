@@ -1077,7 +1077,7 @@ function updateMinimap(){
 }
 
 // ---------- Player ----------
-const GRAVITY = -28, JUMP_SPEED = 9, WALK_SPEED = 5.2, SPRINT_SPEED = 8.4, LADDER_CLIMB_SPEED = 4;
+const GRAVITY = -28, JUMP_SPEED = 9, WALK_SPEED = 5.2, SPRINT_SPEED = 8.4, LADDER_CLIMB_SPEED = 4, SWIM_SPEED = 3.5;
 // Hold Ctrl to crawl: drops to a much shorter hitbox (comfortably under 1 block, so a 1-tall gap with
 // solid floor and ceiling actually clears it) and moves slower, same "hold a modifier key" feel as
 // sprint. player.height/eye shrink to these while crawling and pop back to PLAYER_HEIGHT/PLAYER_EYE
@@ -1087,7 +1087,7 @@ const CRAWL_HEIGHT = 0.75, CRAWL_EYE = 0.55, CRAWL_SPEED = 2.2;
 const player = {
   pos: new THREE.Vector3(0,0,0),
   vel: new THREE.Vector3(0,0,0),
-  yaw: 0, pitch: 0, onGround: false, crawling: false,
+  yaw: 0, pitch: 0, onGround: false, crawling: false, inWater: false,
   width: 0.6, height: PLAYER_HEIGHT, eye: PLAYER_EYE,
 };
 // 10 fixed spawn points spread across the map, as fractions of WORLD_SIZE so they scale with it.
@@ -1811,6 +1811,16 @@ const SFX = {
     playTone(300, 0.5, 'sine', 0.12, 180, 0.05);
     setTimeout(()=>playTone(240, 0.4, 'sine', 0.08, 140, 0.05), 150);
   },
+  // A short 2-3 note chirp; pitchMul shifts the whole thing up/down per species (small birds read
+  // higher, large ones lower) and volume is computed by the caller from distance to the listener,
+  // the closest thing this synth-only sound system has to positional audio.
+  birdTweet(pitchMul, volume){
+    const base = 2100*pitchMul;
+    playTone(base+Math.random()*250, 0.045, 'sine', volume, base*1.25, 0.004);
+    setTimeout(()=>playTone(base*0.82+Math.random()*250, 0.05, 'sine', volume*0.85, base*1.05, 0.004), 55+Math.random()*25);
+    if(Math.random()<0.55) setTimeout(()=>playTone(base*1.05+Math.random()*200, 0.04, 'sine', volume*0.6, base*1.3, 0.004), 115+Math.random()*25);
+  },
+  splash(){ playNoise(0.22, 0.22, 2200, 0.004); playTone(180, 0.15, 'sine', 0.1, 70); },
 };
 lionRoarClip.load();
 fireworkBurstClip.load();
@@ -3101,6 +3111,248 @@ function updateGhost(dt){
   g.light.intensity = night*0.6;
 }
 
+// ---------- Birds: 30 flyable species, ambient wildlife that circles nearby and occasionally tweets ----------
+// Modeled on the fireflies' "home point recycled near the player + closed-form sinusoidal drift"
+// approach rather than the ground animals' wander/aggro state machine — birds fly through open 3D
+// space, not along the ground, and like fireflies/the ghost they're a purely local, non-persistent
+// decoration: nothing about them is saved or synced, so every client just sees its own equally-alive
+// sky. Two of each of the 30 species are aloft at any time. There's no true positional audio in this
+// game's synth-only sound system, so "hearing" a tweet is faked by only ever playing one for a bird
+// currently within BIRD_EARSHOT_RADIUS, with volume scaled by how close it actually is.
+const BIRD_SPECIES = [
+  { id:'robin',       name:'Robin',       body:0x8a5a3a, accent:0xd9702f, size:1.00, pitch:1.00 },
+  { id:'sparrow',     name:'Sparrow',     body:0x9a8a5f, accent:0xc9b98a, size:0.85, pitch:1.15 },
+  { id:'blue_jay',    name:'Blue Jay',    body:0x3a5fbf, accent:0xe8eef5, size:1.05, pitch:0.95 },
+  { id:'cardinal',    name:'Cardinal',    body:0xd41a2a, accent:0x2a2020, size:1.00, pitch:1.05 },
+  { id:'crow',        name:'Crow',        body:0x1c1c1c, accent:0x3a3a3a, size:1.20, pitch:0.65 },
+  { id:'bluebird',    name:'Bluebird',    body:0x3a7fd9, accent:0xd97a3a, size:0.90, pitch:1.10 },
+  { id:'finch',       name:'Finch',       body:0xd9c93a, accent:0x8a9a3a, size:0.80, pitch:1.25 },
+  { id:'swallow',     name:'Swallow',     body:0x1a2a4a, accent:0xe8e4d8, size:0.90, pitch:1.10 },
+  { id:'dove',        name:'Dove',        body:0xc9c2b5, accent:0xa89a8a, size:1.05, pitch:0.85 },
+  { id:'woodpecker',  name:'Woodpecker',  body:0x1a1a1a, accent:0xd41a2a, size:1.05, pitch:0.90 },
+  { id:'owl',         name:'Owl',         body:0x7a5a3a, accent:0xc9a86a, size:1.25, pitch:0.55 },
+  { id:'hawk',        name:'Hawk',        body:0x6a4a2a, accent:0xc9a06a, size:1.30, pitch:0.60 },
+  { id:'eagle',       name:'Eagle',       body:0x3a2a1a, accent:0xe8e0c8, size:1.45, pitch:0.50 },
+  { id:'parrot',      name:'Parrot',      body:0x2a9a4a, accent:0xd4341a, size:1.10, pitch:1.00 },
+  { id:'toucan',      name:'Toucan',      body:0x1a1a1a, accent:0xf0a020, size:1.10, pitch:0.90 },
+  { id:'flamingo',    name:'Flamingo',    body:0xf07aa0, accent:0xd4508a, size:1.35, pitch:0.75 },
+  { id:'hummingbird', name:'Hummingbird', body:0x2a9a6a, accent:0xd4341a, size:0.55, pitch:1.60 },
+  { id:'kingfisher',  name:'Kingfisher',  body:0x2a7ac9, accent:0xd9702f, size:0.85, pitch:1.15 },
+  { id:'heron',       name:'Heron',       body:0x6a7a7a, accent:0xd9d4c5, size:1.35, pitch:0.65 },
+  { id:'pelican',     name:'Pelican',     body:0xe8e4d8, accent:0xa89a8a, size:1.40, pitch:0.60 },
+  { id:'seagull',     name:'Seagull',     body:0xe8e4d8, accent:0x9a9a9a, size:1.10, pitch:0.95 },
+  { id:'magpie',      name:'Magpie',      body:0x1a1a1a, accent:0xe8e4d8, size:1.05, pitch:0.90 },
+  { id:'raven',       name:'Raven',       body:0x0a0a0a, accent:0x2a2a2a, size:1.20, pitch:0.55 },
+  { id:'wren',        name:'Wren',        body:0x8a6a3a, accent:0xc9a86a, size:0.60, pitch:1.40 },
+  { id:'chickadee',   name:'Chickadee',   body:0x2a2a2a, accent:0xe8e4d8, size:0.65, pitch:1.35 },
+  { id:'oriole',      name:'Oriole',      body:0xf0801a, accent:0x1a1a1a, size:0.95, pitch:1.05 },
+  { id:'warbler',     name:'Warbler',     body:0xd4c93a, accent:0x8a9a4a, size:0.75, pitch:1.30 },
+  { id:'swan',        name:'Swan',        body:0xf5f2e8, accent:0xf0a020, size:1.40, pitch:0.60 },
+  { id:'duck',        name:'Duck',        body:0x2a5a3a, accent:0x8a6a3a, size:1.00, pitch:0.85 },
+  { id:'goose',       name:'Goose',       body:0x8a8270, accent:0x3a3a3a, size:1.25, pitch:0.70 },
+];
+const BIRD_COUNT = BIRD_SPECIES.length * 2;
+const BIRD_RADIUS = 32; // recycle a bird's home once it's this far (x/z) from the player
+const BIRD_EARSHOT_RADIUS = 20; // only a bird within this many blocks of the player is ever heard
+const birds = [];
+const birdTexCache = new Map();
+function hexToCss(hex){ return '#'+hex.toString(16).padStart(6,'0'); }
+// A flat side-profile flying-bird silhouette (body + head/beak + tail + a shallow gull-wing "M" band)
+// — per-pixel, not canvas arcs (the lesson the ghost's tail taught early on) — reads correctly as a
+// bird at any billboard angle, and is cheap to share: one texture per species, cached, not per bird.
+function buildBirdTexture(species){
+  if(birdTexCache.has(species.id)) return birdTexCache.get(species.id);
+  const W=32, H=20;
+  const canvas = document.createElement('canvas');
+  canvas.width=W; canvas.height=H;
+  const ctx = canvas.getContext('2d');
+  const bodyStr = hexToCss(species.body), accentStr = hexToCss(species.accent);
+  const cx=W/2-1, cy=11;
+  for(let y=0;y<H;y++){
+    for(let x=0;x<W;x++){
+      const dx=x-cx, dy=y-cy;
+      const inBody = (dx*dx)/(6.2*6.2) + (dy*dy)/(3.4*3.4) < 1;
+      const hx=dx-6.5, hy=dy-0.5;
+      const inHead = hx*hx+hy*hy < 2.4*2.4;
+      const inBeak = dx>8 && dx<12.5 && Math.abs(dy-0.5-(dx-8)*0.12)<0.9;
+      const inTail = dx<-6 && dx>-11 && Math.abs(dy-(-6-dx)*0.22)<1.3;
+      const side = Math.abs(dx);
+      const wingDip = 2.6 - Math.min(side,13)*0.4;
+      const inWing = side>1.5 && side<14 && dy<0 && Math.abs(dy-(-wingDip))<1.3;
+      let color = null;
+      if(inBeak) color = '#e8a83d';
+      else if(inHead) color = bodyStr;
+      else if(inBody) color = (dy>0.5 && Math.abs(dx)<4.5) ? accentStr : bodyStr;
+      else if(inTail) color = accentStr;
+      else if(inWing) color = bodyStr;
+      if(color){ ctx.fillStyle = color; ctx.fillRect(x,y,1,1); }
+    }
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.magFilter = THREE.NearestFilter;
+  tex.minFilter = THREE.NearestFilter;
+  tex.generateMipmaps = false;
+  birdTexCache.set(species.id, tex);
+  return tex;
+}
+function spawnBirdHome(b){
+  const ang = Math.random()*Math.PI*2, r = 8+Math.random()*(BIRD_RADIUS-8);
+  const x = player.pos.x + Math.cos(ang)*r;
+  const z = player.pos.z + Math.sin(ang)*r;
+  b.homeX = x; b.homeZ = z;
+  b.baseY = heightAt(Math.floor(x), Math.floor(z)) + 6 + Math.random()*8; // above the canopy line
+}
+function ensureBirds(){
+  if(birds.length) return;
+  for(let i=0;i<BIRD_COUNT;i++){
+    const species = BIRD_SPECIES[i % BIRD_SPECIES.length];
+    const mat = new THREE.SpriteMaterial({ map: buildBirdTexture(species), transparent:true, alphaTest:0.3 });
+    const sprite = new THREE.Sprite(mat);
+    const s = 1.1*species.size;
+    sprite.scale.set(s, s*0.625, 1);
+    scene.add(sprite);
+    const b = {
+      sprite, species, homeX:0, homeZ:0, baseY:0,
+      freqX: 0.15+Math.random()*0.2, freqY: 0.4+Math.random()*0.5, freqZ: 0.15+Math.random()*0.2,
+      ampXZ: 5+Math.random()*7, ampY: 1+Math.random()*1.5, phase: Math.random()*Math.PI*2,
+      tweetTimer: 2+Math.random()*8, baseScaleX: s,
+    };
+    spawnBirdHome(b);
+    birds.push(b);
+  }
+}
+function updateBirds(dt){
+  ensureBirds();
+  const t = performance.now()/1000;
+  for(const b of birds){
+    const dx = b.homeX-player.pos.x, dz = b.homeZ-player.pos.z;
+    if(dx*dx+dz*dz > BIRD_RADIUS*BIRD_RADIUS) spawnBirdHome(b);
+    const x = b.homeX + Math.sin(t*b.freqX+b.phase)*b.ampXZ;
+    const z = b.homeZ + Math.cos(t*b.freqZ+b.phase*1.3)*b.ampXZ;
+    const y = Math.max(2, b.baseY + Math.sin(t*b.freqY+b.phase*0.7)*b.ampY);
+    b.sprite.position.set(x,y,z);
+    const vx = Math.cos(t*b.freqX+b.phase)*b.freqX*b.ampXZ; // face the way it's actually moving
+    b.sprite.scale.x = b.baseScaleX * (vx<0 ? -1 : 1);
+
+    b.tweetTimer -= dt;
+    if(b.tweetTimer<=0){
+      b.tweetTimer = 4+Math.random()*8;
+      const dist = Math.hypot(x-player.pos.x, y-(player.pos.y+player.eye), z-player.pos.z);
+      if(dist < BIRD_EARSHOT_RADIUS) SFX.birdTweet(b.species.pitch, Math.max(0,1-dist/BIRD_EARSHOT_RADIUS)*0.13);
+    }
+  }
+}
+
+// ---------- Fish: swim in the water, ambient wildlife ----------
+// Same local-only, recycled-near-the-player home-point approach as birds/fireflies, but a fish's home
+// is a specific nearby water column (found by scanning for heightAt(x,z) < SEA_LEVEL, the exact
+// condition world generation itself uses to flood a column) and its drift is clamped to that column's
+// real water depth (its bottom is the terrain, its top is SEA_LEVEL) rather than open space. If no
+// water happens to be within FISH_RADIUS of the player (deep inland) a fish just stays invisible until
+// one wanders into range, instead of popping up stranded on dry land.
+const FISH_SPECIES = [
+  { id:'goldfish',   name:'Goldfish',   body:0xf0801a, accent:0xffe0a0, size:0.75 },
+  { id:'bass',       name:'Bass',       body:0x5a7a5a, accent:0x2a3a2a, size:1.10 },
+  { id:'salmon',     name:'Salmon',     body:0xe08a8a, accent:0xc95a6a, size:1.00 },
+  { id:'tuna',       name:'Tuna',       body:0x3a5a7a, accent:0xd8e0e8, size:1.30 },
+  { id:'clownfish',  name:'Clownfish',  body:0xf0601a, accent:0xffffff, size:0.65 },
+  { id:'catfish',    name:'Catfish',    body:0x6a5a4a, accent:0x4a3a2a, size:1.15 },
+];
+const FISH_COUNT = FISH_SPECIES.length * 4;
+const FISH_RADIUS = 26;
+const fish = [];
+const fishTexCache = new Map();
+// A flat side-profile torpedo body + tail fin + a small dorsal bump — same per-pixel, one-per-species
+// approach as buildBirdTexture.
+function buildFishTexture(species){
+  if(fishTexCache.has(species.id)) return fishTexCache.get(species.id);
+  const W=24, H=14;
+  const canvas = document.createElement('canvas');
+  canvas.width=W; canvas.height=H;
+  const ctx = canvas.getContext('2d');
+  const bodyStr = hexToCss(species.body), accentStr = hexToCss(species.accent);
+  const cx=W/2-1, cy=7;
+  for(let y=0;y<H;y++){
+    for(let x=0;x<W;x++){
+      const dx=x-cx, dy=y-cy;
+      const inBody = (dx*dx)/(7*7) + (dy*dy)/(3.2*3.2) < 1;
+      const inTail = dx<-6 && dx>-11 && Math.abs(dy)<(2.6-(-6-dx)*0.15) && Math.abs(dy)>0.3;
+      const inDorsal = dx>-2 && dx<2 && dy<-2.6 && dy>-4.2;
+      const inEye = (dx-4.5)*(dx-4.5)+(dy+0.8)*(dy+0.8) < 0.9*0.9;
+      let color = null;
+      if(inEye) color = '#141414';
+      else if(inDorsal) color = accentStr;
+      else if(inTail) color = accentStr;
+      else if(inBody) color = (dy>0.8) ? accentStr : bodyStr;
+      if(color){ ctx.fillStyle = color; ctx.fillRect(x,y,1,1); }
+    }
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.magFilter = THREE.NearestFilter;
+  tex.minFilter = THREE.NearestFilter;
+  tex.generateMipmaps = false;
+  fishTexCache.set(species.id, tex);
+  return tex;
+}
+function findFishSpot(){
+  for(let tries=0; tries<20; tries++){
+    const ang = Math.random()*Math.PI*2, r = 4+Math.random()*(FISH_RADIUS-4);
+    const x = Math.floor(player.pos.x + Math.cos(ang)*r);
+    const z = Math.floor(player.pos.z + Math.sin(ang)*r);
+    const h = heightAt(x,z);
+    if(h < SEA_LEVEL) return { x:x+0.5, z:z+0.5, bottom:h+1, top:SEA_LEVEL };
+  }
+  return null;
+}
+function spawnFishHome(f){
+  const spot = findFishSpot();
+  if(!spot){ f.hasHome = false; f.sprite.visible = false; return; }
+  f.hasHome = true; f.sprite.visible = true;
+  f.homeX = spot.x; f.homeZ = spot.z; f.bottom = spot.bottom; f.top = spot.top;
+  // Center of the column's actual water depth (spot.top - spot.bottom + 1 blocks, inclusive) —
+  // written this way rather than a min/max clamp so it stays correct even for a 1-block-deep
+  // shoreline column (bottom===top), where an earlier version of this clamp could compute a baseY
+  // that floored to the sand below the water instead of the water block itself.
+  const depth = spot.top - spot.bottom + 1;
+  f.baseY = spot.bottom + depth/2;
+}
+function ensureFish(){
+  if(fish.length) return;
+  for(let i=0;i<FISH_COUNT;i++){
+    const species = FISH_SPECIES[i % FISH_SPECIES.length];
+    const mat = new THREE.SpriteMaterial({ map: buildFishTexture(species), transparent:true, alphaTest:0.3 });
+    const sprite = new THREE.Sprite(mat);
+    const s = 0.55*species.size;
+    sprite.scale.set(s, s*0.58, 1);
+    scene.add(sprite);
+    const f = {
+      sprite, species, homeX:0, homeZ:0, bottom:1, top:1, baseY:1, hasHome:false,
+      freqX: 0.2+Math.random()*0.3, freqZ: 0.2+Math.random()*0.3,
+      ampXZ: 1.5+Math.random()*2.5, phase: Math.random()*Math.PI*2,
+      vertPeriod: 6+Math.random()*10, vertPhase: Math.random()*Math.PI*2, baseScaleX: s,
+    };
+    spawnFishHome(f);
+    fish.push(f);
+  }
+}
+function updateFish(dt){
+  ensureFish();
+  const t = performance.now()/1000;
+  for(const f of fish){
+    if(!f.hasHome){ spawnFishHome(f); if(!f.hasHome) continue; }
+    const dx = f.homeX-player.pos.x, dz = f.homeZ-player.pos.z;
+    if(dx*dx+dz*dz > FISH_RADIUS*FISH_RADIUS){ spawnFishHome(f); if(!f.hasHome) continue; }
+    let x = f.homeX + Math.sin(t*f.freqX+f.phase)*f.ampXZ;
+    let z = f.homeZ + Math.cos(t*f.freqZ+f.phase*1.3)*f.ampXZ;
+    const vertRange = Math.max(0.3, (f.top-f.bottom)/2 - 0.3);
+    let y = f.baseY + Math.sin(t/f.vertPeriod*Math.PI*2+f.vertPhase)*vertRange;
+    if(getBlock(Math.floor(x), Math.floor(y), Math.floor(z)) !== WATER){ x=f.homeX; z=f.homeZ; y=f.baseY; }
+    f.sprite.position.set(x,y,z);
+    const vx = Math.cos(t*f.freqX+f.phase)*f.freqX*f.ampXZ;
+    f.sprite.scale.x = f.baseScaleX * (vx<0 ? -1 : 1);
+  }
+}
+
 // ---------- Saplings: little trees that randomly appear on grass and slowly grow into full trees ----------
 const SAPLING_MAX_STAGE = 3;          // height in blocks while still growing, before it becomes a real tree
 const SAPLING_STAGE_MS = 400000;      // real time between each extra block of height (10x slower)
@@ -3755,6 +4007,12 @@ function isTouchingLadder(){
         if(getBlock(x,y,z)===LADDER) return true;
   return false;
 }
+// A single check at body-center height, not "any part of the hitbox touches water" — so wading
+// through ankle-deep shoreline water (only the bottom sliver of the hitbox in a WATER cell) still
+// walks normally, and only genuinely being submerged switches on swim controls.
+function isInWater(){
+  return getBlock(Math.floor(player.pos.x), Math.floor(player.pos.y+player.height*0.5), Math.floor(player.pos.z))===WATER;
+}
 function updatePlayer(dt){
   const fx = -Math.sin(player.yaw), fz = -Math.cos(player.yaw);
   const rx =  Math.cos(player.yaw), rz = -Math.sin(player.yaw);
@@ -3774,14 +4032,24 @@ function updatePlayer(dt){
 
   const wasOnGround = player.onGround;
   const onLadder = isTouchingLadder();
+  const inWater = isInWater();
+  if(inWater && !player.inWater) SFX.splash();
+  player.inWater = inWater;
 
   if(onLadder){
     // Climbing overrides gravity entirely — hold W/Space to go up, S to go down, let go to hang in
-    // place, same feel as swimming would be if this game had it.
+    // place, same feel as swimming.
     let climbY = 0;
     if(keys['KeyW'] || keys['Space']) climbY = LADDER_CLIMB_SPEED;
     else if(keys['KeyS']) climbY = -LADDER_CLIMB_SPEED;
     player.vel.y = climbY;
+  } else if(inWater){
+    // Same shape as ladder climbing — hold W/Space to swim up, S to swim down, let go to float in
+    // place instead of sinking or gravity taking back over.
+    let swimY = 0;
+    if(keys['KeyW'] || keys['Space']) swimY = SWIM_SPEED;
+    else if(keys['KeyS']) swimY = -SWIM_SPEED;
+    player.vel.y = swimY;
   } else {
     player.vel.y += GRAVITY*dt;
     if(player.vel.y < -50) player.vel.y = -50;
@@ -3813,7 +4081,7 @@ function updatePlayer(dt){
     }
     SFX.land();
   }
-  if(player.onGround || onLadder) player.fallFrom = player.pos.y;
+  if(player.onGround || onLadder || inWater) player.fallFrom = player.pos.y;
 
   player.pos.x = Math.max(1, Math.min(WORLD_SIZE-1, player.pos.x));
   player.pos.z = Math.max(1, Math.min(WORLD_SIZE-1, player.pos.z));
@@ -4211,6 +4479,8 @@ function renderDebugPanel(){
       <tr><td>Animals</td><td>${animals.length}</td></tr>
       <tr><td>Worms</td><td>${worms.length}</td></tr>
       <tr><td>Butterflies</td><td>${butterflies.length}</td></tr>
+      <tr><td>Birds</td><td>${birds.length}</td></tr>
+      <tr><td>Fish</td><td>${fish.length}</td></tr>
       <tr><td>Active fires</td><td>${fires.size}</td></tr>
       <tr><td>Falling clusters</td><td>${fallingClusters.length}</td></tr>
       <tr><td>Players online</td><td>${remotePlayers.size+1}</td></tr>
@@ -4503,6 +4773,8 @@ function animate(now){
   updateWorms(dt);
   updateButterflies(dt);
   updateGhost(dt);
+  updateBirds(dt);
+  updateFish(dt);
   heldTorchLight.visible = HOTBAR[selectedSlot]===TORCH;
   if(heldTorchLight.visible) heldTorchLight.intensity = 1.0 + Math.random()*0.3;
   updateDayNight();
