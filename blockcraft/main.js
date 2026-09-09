@@ -3281,41 +3281,57 @@ const FISH_SPECIES = [
 const FISH_COUNT = FISH_SPECIES.length * 4;
 const FISH_RADIUS = 26;
 const fish = [];
-const fishTexCache = new Map();
-function hexToCss(hex){ return '#'+hex.toString(16).padStart(6,'0'); }
-// A flat side-profile torpedo body + tail fin + a small dorsal bump — per-pixel, one texture per
-// species, cached and shared across every fish of that species (birds moved to real 3D geometry so
-// they read correctly from any angle, but fish stay underwater sprites — you mostly see them from
-// roughly the side/above through the water surface, where a flat cutout still reads fine).
-function buildFishTexture(species){
-  if(fishTexCache.has(species.id)) return fishTexCache.get(species.id);
-  const W=24, H=14;
-  const canvas = document.createElement('canvas');
-  canvas.width=W; canvas.height=H;
-  const ctx = canvas.getContext('2d');
-  const bodyStr = hexToCss(species.body), accentStr = hexToCss(species.accent);
-  const cx=W/2-1, cy=7;
-  for(let y=0;y<H;y++){
-    for(let x=0;x<W;x++){
-      const dx=x-cx, dy=y-cy;
-      const inBody = (dx*dx)/(7*7) + (dy*dy)/(3.2*3.2) < 1;
-      const inTail = dx<-6 && dx>-11 && Math.abs(dy)<(2.6-(-6-dx)*0.15) && Math.abs(dy)>0.3;
-      const inDorsal = dx>-2 && dx<2 && dy<-2.6 && dy>-4.2;
-      const inEye = (dx-4.5)*(dx-4.5)+(dy+0.8)*(dy+0.8) < 0.9*0.9;
-      let color = null;
-      if(inEye) color = '#141414';
-      else if(inDorsal) color = accentStr;
-      else if(inTail) color = accentStr;
-      else if(inBody) color = (dy>0.8) ? accentStr : bodyStr;
-      if(color){ ctx.fillStyle = color; ctx.fillRect(x,y,1,1); }
-    }
+const fishMatCache = new Map(); // species.id -> {body, accent} materials, shared across that species' instances
+const fishEyeMat = new THREE.MeshLambertMaterial({ color: 0x141414 });
+function fishMaterials(species){
+  let m = fishMatCache.get(species.id);
+  if(!m){
+    m = { body: new THREE.MeshLambertMaterial({ color: species.body }), accent: new THREE.MeshLambertMaterial({ color: species.accent }) };
+    fishMatCache.set(species.id, m);
   }
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.magFilter = THREE.NearestFilter;
-  tex.minFilter = THREE.NearestFilter;
-  tex.generateMipmaps = false;
-  fishTexCache.set(species.id, tex);
-  return tex;
+  return m;
+}
+// A real 3D torpedo body (same "compose animalBox primitives into a THREE.Group" approach as the
+// birds and the animal models) — a body, a belly stripe, two eye dots, a dorsal fin, two side
+// (pectoral) fins, and a tail on its own pivot so it can wiggle side to side like a swimming fish
+// actually does, instead of flapping like a bird's wings.
+function buildFishMesh(species){
+  const { body: bodyMat, accent: accentMat } = fishMaterials(species);
+  const g = new THREE.Group();
+
+  g.add(animalBox(0.14, 0.13, 0.32, bodyMat));
+  const belly = animalBox(0.1, 0.06, 0.22, accentMat);
+  belly.position.set(0, -0.06, 0.02);
+  g.add(belly);
+
+  for(const side of [1,-1]){
+    const eye = animalBox(0.02, 0.02, 0.02, fishEyeMat);
+    eye.position.set(side*0.06, 0.02, -0.13);
+    g.add(eye);
+  }
+
+  const dorsal = animalBox(0.02, 0.08, 0.1, accentMat);
+  dorsal.position.set(0, 0.09, 0);
+  g.add(dorsal);
+
+  for(const side of [1,-1]){
+    const fin = animalBox(0.1, 0.02, 0.08, accentMat);
+    fin.position.set(side*0.08, -0.01, -0.08);
+    fin.rotation.z = side*0.4;
+    g.add(fin);
+  }
+
+  const tailPivot = new THREE.Group();
+  tailPivot.position.set(0, 0, 0.16);
+  const tail = animalBox(0.02, 0.12, 0.16, accentMat);
+  tail.geometry.translate(0, 0, 0.08); // offset so it extends backward from the pivot, not centered on it
+  tailPivot.add(tail);
+  g.add(tailPivot);
+
+  g.userData.tail = tailPivot;
+  g.scale.setScalar(species.size);
+  g.traverse(o => { if(o.isMesh) o.castShadow = true; });
+  return g;
 }
 function findFishSpot(){
   for(let tries=0; tries<20; tries++){
@@ -3329,8 +3345,8 @@ function findFishSpot(){
 }
 function spawnFishHome(f){
   const spot = findFishSpot();
-  if(!spot){ f.hasHome = false; f.sprite.visible = false; return; }
-  f.hasHome = true; f.sprite.visible = true;
+  if(!spot){ f.hasHome = false; f.mesh.visible = false; return; }
+  f.hasHome = true; f.mesh.visible = true;
   f.homeX = spot.x; f.homeZ = spot.z; f.bottom = spot.bottom; f.top = spot.top;
   // Center of the column's actual water depth (spot.top - spot.bottom + 1 blocks, inclusive) —
   // written this way rather than a min/max clamp so it stays correct even for a 1-block-deep
@@ -3343,16 +3359,14 @@ function ensureFish(){
   if(fish.length) return;
   for(let i=0;i<FISH_COUNT;i++){
     const species = FISH_SPECIES[i % FISH_SPECIES.length];
-    const mat = new THREE.SpriteMaterial({ map: buildFishTexture(species), transparent:true, alphaTest:0.3 });
-    const sprite = new THREE.Sprite(mat);
-    const s = 0.55*species.size;
-    sprite.scale.set(s, s*0.58, 1);
-    scene.add(sprite);
+    const mesh = buildFishMesh(species);
+    scene.add(mesh);
     const f = {
-      sprite, species, homeX:0, homeZ:0, bottom:1, top:1, baseY:1, hasHome:false,
+      mesh, species, homeX:0, homeZ:0, bottom:1, top:1, baseY:1, hasHome:false,
       freqX: 0.2+Math.random()*0.3, freqZ: 0.2+Math.random()*0.3,
       ampXZ: 1.5+Math.random()*2.5, phase: Math.random()*Math.PI*2,
-      vertPeriod: 6+Math.random()*10, vertPhase: Math.random()*Math.PI*2, baseScaleX: s,
+      vertPeriod: 6+Math.random()*10, vertPhase: Math.random()*Math.PI*2,
+      tailPhase: Math.random()*Math.PI*2, tailSpeed: 5+Math.random()*3,
     };
     spawnFishHome(f);
     fish.push(f);
@@ -3365,14 +3379,20 @@ function updateFish(dt){
     if(!f.hasHome){ spawnFishHome(f); if(!f.hasHome) continue; }
     const dx = f.homeX-player.pos.x, dz = f.homeZ-player.pos.z;
     if(dx*dx+dz*dz > FISH_RADIUS*FISH_RADIUS){ spawnFishHome(f); if(!f.hasHome) continue; }
-    let x = f.homeX + Math.sin(t*f.freqX+f.phase)*f.ampXZ;
-    let z = f.homeZ + Math.cos(t*f.freqZ+f.phase*1.3)*f.ampXZ;
+    const ax = t*f.freqX+f.phase, az = t*f.freqZ+f.phase*1.3;
+    let x = f.homeX + Math.sin(ax)*f.ampXZ;
+    let z = f.homeZ + Math.cos(az)*f.ampXZ;
     const vertRange = Math.max(0.3, (f.top-f.bottom)/2 - 0.3);
     let y = f.baseY + Math.sin(t/f.vertPeriod*Math.PI*2+f.vertPhase)*vertRange;
     if(getBlock(Math.floor(x), Math.floor(y), Math.floor(z)) !== WATER){ x=f.homeX; z=f.homeZ; y=f.baseY; }
-    f.sprite.position.set(x,y,z);
-    const vx = Math.cos(t*f.freqX+f.phase)*f.freqX*f.ampXZ;
-    f.sprite.scale.x = f.baseScaleX * (vx<0 ? -1 : 1);
+    f.mesh.position.set(x,y,z);
+    // Face the direction it's actually swimming — same analytic-derivative + atan2(-vx,-vz)
+    // convention used for the player and the birds.
+    const vx = Math.cos(ax)*f.freqX*f.ampXZ, vz = -Math.sin(az)*f.freqZ*f.ampXZ;
+    if(vx*vx+vz*vz > 0.0001) f.mesh.rotation.y = Math.atan2(-vx,-vz);
+
+    f.tailPhase += dt*f.tailSpeed;
+    f.mesh.userData.tail.rotation.y = Math.sin(f.tailPhase)*0.6; // side-to-side wiggle, not a bird's up/down flap
   }
 }
 
