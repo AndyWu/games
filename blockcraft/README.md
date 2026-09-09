@@ -118,6 +118,23 @@ Every human player has 10 hearts (20 HP), shown at the top of the screen. The wo
 
 Cows and sheep are always harmless — you can hit them but they never fight back. Dogs and giraffes only turn hostile once you attack them. Lions and elephants will charge and attack on their own if you wander too close, whether or not you've touched them. Left-click anything in range to attack it (a fixed 1-heart hit, on a short cooldown); killing an animal or a player's HP dropping to 0 is synced live through Firebase, so a kill is permanent for everyone in the shared world, not just you. Dying freezes you in place for 3 seconds (with a respawn countdown on screen) before resetting you to full health at a random spawn point, picked from 10 fixed spots around the map — never the same one twice in a row.
 
+### Hunger
+
+You also have a hunger bar (10 drumsticks, right under your hearts) that empties slowly over time — about 19 real minutes from full to empty — regardless of what you're doing. While it's above empty, standing still for a couple of seconds regenerates health the same as always; once it hits zero, regen stops and you'll start taking slow damage until you eat something.
+
+Killing an animal always drops Meat — bigger animals drop more:
+
+| Animal   | Meat dropped |
+|----------|--------------|
+| Sheep    | 1            |
+| Dog      | 1            |
+| Lion     | 2            |
+| Cow      | 2            |
+| Giraffe  | 3            |
+| Elephant | 4            |
+
+Select Meat in your hotbar and right-click (or the place/interact button on touch) to eat a piece — each one refills 2 drumsticks, up to the max. Meat is eat-only; it can't be placed as a block.
+
 Every animal is modeled at real-world scale — world units are ~1 unit = 1 meter throughout, the same scale the 1.8-unit-tall player uses. That means giraffes and elephants tower well over you. Bigger animals also get a proportionally longer attack reach so their size isn't just cosmetic.
 
 Killing off a species doesn't leave the world permanently empty — every animal type slowly respawns over time (checked periodically, replacing at most one missing animal every few seconds, so it never feels like a sudden burst) until each species is back to its starting population.

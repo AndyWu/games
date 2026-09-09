@@ -18,7 +18,7 @@ const AIR=0, GRASS=1, DIRT=2, STONE=3, SAND=4, WOOD=5, LEAVES=6, PLANKS=7, WATER
 const CRAFTING_TABLE=10, BRICKS=11, STICK=12;
 const WINDOW=13, WINDOW_OPEN=14, DOOR=15, DOOR_OPEN=16;
 const SAPLING=17;
-const FLINT=18, FIRE=19, TORCH=20, FIREWORK=21, LADDER=22;
+const FLINT=18, FIRE=19, TORCH=20, FIREWORK=21, LADDER=22, MEAT=23;
 
 const BLOCK_COLOR = {
   [GRASS]:  0x5b8a3a,
@@ -43,6 +43,7 @@ const BLOCK_COLOR = {
   [TORCH]: 0xd98a3d,
   [FIREWORK]: 0xd94dcf,
   [LADDER]: 0x8a6a3a,
+  [MEAT]: 0xc9695a,
 };
 const BLOCK_NAME = {
   [GRASS]:'Grass', [DIRT]:'Dirt', [STONE]:'Stone', [SAND]:'Sand', [WOOD]:'Wood',
@@ -50,12 +51,12 @@ const BLOCK_NAME = {
   [CRAFTING_TABLE]:'Crafting Table', [BRICKS]:'Bricks', [STICK]:'Stick',
   [WINDOW]:'Window', [WINDOW_OPEN]:'Window (open)', [DOOR]:'Door', [DOOR_OPEN]:'Door (open)',
   [SAPLING]:'Sapling', [FLINT]:'Flint', [FIRE]:'Fire', [TORCH]:'Torch', [FIREWORK]:'Firework',
-  [LADDER]:'Ladder',
+  [LADDER]:'Ladder', [MEAT]:'Meat',
 };
 // Every item the player can ever select. The hotbar only shows HOTBAR_SIZE of these at a time —
 // the rest are reachable through the Items panel (the palette button, or the "I" key), which lets
 // the player swap any hotbar slot for anything in this list.
-const ALL_ITEMS = [GRASS, DIRT, STONE, SAND, WOOD, LEAVES, PLANKS, WATER, CRAFTING_TABLE, BRICKS, STICK, WINDOW, DOOR, FLINT, TORCH, FIREWORK, LADDER];
+const ALL_ITEMS = [GRASS, DIRT, STONE, SAND, WOOD, LEAVES, PLANKS, WATER, CRAFTING_TABLE, BRICKS, STICK, WINDOW, DOOR, FLINT, TORCH, FIREWORK, LADDER, MEAT];
 const HOTBAR_SIZE = 9;
 const DEFAULT_HOTBAR = [GRASS, DIRT, STONE, SAND, WOOD, PLANKS, CRAFTING_TABLE, DOOR, FLINT];
 const HOTBAR = DEFAULT_HOTBAR.slice();
@@ -72,7 +73,7 @@ function loadHotbar(){
 }
 // A few items are structures/tools, not plain materials — give them a distinct glyph on top of
 // their swatch so they read at a glance instead of just being "another colored square."
-const HOTBAR_ICON = { [CRAFTING_TABLE]: '🛠️', [WINDOW]: '🪟', [DOOR]: '🚪', [FLINT]: '🔥', [TORCH]: '🕯️', [FIREWORK]: '🎆', [LADDER]: '🪜' };
+const HOTBAR_ICON = { [CRAFTING_TABLE]: '🛠️', [WINDOW]: '🪟', [DOOR]: '🚪', [FLINT]: '🔥', [TORCH]: '🕯️', [FIREWORK]: '🎆', [LADDER]: '🪜', [MEAT]: '🍗' };
 // Blocks with an open/closed state: right-clicking one toggles it to the other id in this map.
 const TOGGLE_MAP = { [WINDOW]:WINDOW_OPEN, [WINDOW_OPEN]:WINDOW, [DOOR]:DOOR_OPEN, [DOOR_OPEN]:DOOR };
 // Breaking the open form of a toggleable block gives you back its closed (placeable) form.
@@ -89,6 +90,20 @@ const AGGRO_RADIUS = 6;
 const DEAGGRO_RADIUS = 11;
 const RETALIATE_MS = 8000;
 const FALL_DAMAGE_FREE_BLOCKS = 3; // first 3 blocks of any fall are damage-free, like stepping down normally
+
+// ---------- Hunger ----------
+// Mirrors the hearts exactly (10 icons, 2 points each) so it reads as a second, parallel stat rather
+// than a differently-scaled bar. Ticks down purely on a real-time clock (no exhaustion-from-activity
+// like real Minecraft — simplest version that still makes food a real, recurring need): a full bar
+// lasts HUNGER_DECAY_INTERVAL_S * (PLAYER_MAX_HUNGER-1) real seconds, about 19 minutes at the numbers
+// below. Passive HP regen (see updatePlayer) stops once hunger hits 0, and staying at 0 starts a slow
+// starvation damage tick — same tick/tick-timer shape as the temperature-danger system.
+const PLAYER_MAX_HUNGER = 20;
+const HUNGER_PER_ICON = 2;
+const HUNGER_DECAY_INTERVAL_S = 60; // lose 1 hunger point every real minute
+const STARVE_DAMAGE_TICK_S = 4;
+const STARVE_DAMAGE = 1;
+const MEAT_HUNGER_RESTORE = 4; // 2 icons per piece eaten
 
 // HP is scaled against the 20-HP (10-heart) human baseline to roughly track real-world size/toughness:
 // sheep and dogs are small and fragile; cows are human-sized; giraffes are big but not armored;
@@ -112,6 +127,10 @@ const ANIMAL_STATS = {
 const ANIMAL_REAL_HEIGHT = {
   sheep: 0.8, dog: 0.58, cow: 1.4, giraffe: 3.0, lion: 1.2, elephant: 3.3,
 };
+// How much Meat killing each animal drops, non-decreasing with its real size above (dog/sheep are the
+// smallest, elephant the biggest) — not a strict formula, just hand-picked round numbers in the same
+// order.
+const MEAT_YIELD = { dog:1, sheep:1, lion:2, cow:2, giraffe:3, elephant:4 };
 // Rough horizontal collision radius per species, used for entity-vs-entity collision below.
 const ANIMAL_RADIUS = {
   sheep: 0.35, dog: 0.22, cow: 0.5, giraffe: 0.5, lion: 0.4, elephant: 0.95,
@@ -1580,7 +1599,16 @@ function damageAnimal(a, dmg){
   const stats = ANIMAL_STATS[a.type];
   if(stats.retaliate) a.aggroUntil = performance.now() + RETALIATE_MS;
   if(fbReady) db.ref('world/mobs/'+a.id+'/hp').set(a.hp);
-  if(a.hp<=0){ SFX.animalDeath(); killAnimal(a); }
+  if(a.hp<=0){
+    SFX.animalDeath();
+    // Only the client that actually lands the killing hit ever reaches this branch — a remote kill
+    // arrives through applyRemoteMobHp below instead, which never calls damageAnimal — so meat can't
+    // be double-awarded to bystanders who just see the HP sync.
+    invAdd(MEAT, MEAT_YIELD[a.type] || 1);
+    saveInventory();
+    updateHotbarUI();
+    killAnimal(a);
+  }
 }
 function applyRemoteMobHp(id, hp){
   const a = animals.find(x=>x.id===id);
@@ -1822,12 +1850,18 @@ const SFX = {
     if(Math.random()<0.55) setTimeout(()=>playTone(base*1.05+Math.random()*200, 0.04, 'sine', volume*0.6, base*1.3, 0.004), 115+Math.random()*25);
   },
   splash(){ playNoise(0.22, 0.22, 2200, 0.004); playTone(180, 0.15, 'sine', 0.1, 70); },
+  // Two quick low, dampened noise thuds — a "chomp, chomp" bite rather than anything sustained.
+  eat(){
+    playNoise(0.07, 0.18, 700, 0.004);
+    setTimeout(()=>playNoise(0.08, 0.16, 650, 0.004), 90);
+  },
 };
 lionRoarClip.load();
 fireworkBurstClip.load();
 
 // ---------- Combat ----------
 let myHP = PLAYER_MAX_HP;
+let myHunger = PLAYER_MAX_HUNGER; // same as myHP — in-memory only, resets to full on reload/respawn
 let myName = 'Player';
 try{ const savedName = localStorage.getItem('blockcraft_player_name'); if(savedName) myName = savedName; }catch(e){}
 // Regen: standing still (no movement keys held) for a bit slowly heals a half-heart at a time.
@@ -1856,6 +1890,23 @@ function updateHeartsUI(){
     const remaining = Math.max(0, Math.min(HP_PER_HEART, myHP - i*HP_PER_HEART));
     const kind = remaining>=HP_PER_HEART ? 'full' : (remaining>0 ? 'half' : 'empty');
     el.insertAdjacentHTML('beforeend', heartSVG(kind,i));
+  }
+}
+// Emoji rather than hand-drawn SVG (unlike the hearts) — a drumstick silhouette isn't a simple enough
+// shape to hand-derive a path for reliably, and this game already leans on plain emoji elsewhere in
+// the HUD (weather, worm/butterfly counts). Full = a drumstick, half = the same drumstick dimmed, empty
+// = a bare bone — reads at a glance without needing a legend.
+function updateHungerUI(){
+  const el = document.getElementById('hunger');
+  if(!el) return;
+  el.innerHTML = '';
+  const totalIcons = PLAYER_MAX_HUNGER / HUNGER_PER_ICON;
+  for(let i=0;i<totalIcons;i++){
+    const remaining = Math.max(0, Math.min(HUNGER_PER_ICON, myHunger - i*HUNGER_PER_ICON));
+    const span = document.createElement('span');
+    span.textContent = remaining>0 ? '🍗' : '🦴';
+    span.style.opacity = remaining>=HUNGER_PER_ICON ? '1' : (remaining>0 ? '0.45' : '0.7');
+    el.appendChild(span);
   }
 }
 let hurtFlashTimeout = null;
@@ -1894,6 +1945,8 @@ function respawnAfterDeath(){
   spawnPlayer();
   myHP = PLAYER_MAX_HP;
   updateHeartsUI();
+  myHunger = PLAYER_MAX_HUNGER;
+  updateHungerUI();
   if(fbReady) db.ref('players/'+myId+'/hp').set(myHP);
 }
 function updateDeathState(dt){
@@ -2482,6 +2535,21 @@ function updateTemperature(dt){
     } else {
       tempDamageTimer = TEMP_DAMAGE_TICK_S;
     }
+  }
+}
+
+let hungerDecayTimer = HUNGER_DECAY_INTERVAL_S, starveDamageTimer = STARVE_DAMAGE_TICK_S;
+function updateHunger(dt){
+  if(!locked || isDead) return;
+  hungerDecayTimer -= dt;
+  if(hungerDecayTimer<=0){
+    hungerDecayTimer = HUNGER_DECAY_INTERVAL_S;
+    if(myHunger>0){ myHunger--; updateHungerUI(); }
+  }
+  starveDamageTimer -= dt;
+  if(starveDamageTimer<=0){
+    starveDamageTimer = STARVE_DAMAGE_TICK_S;
+    if(myHunger<=0) damagePlayer(STARVE_DAMAGE, 'hunger');
   }
 }
 
@@ -4155,7 +4223,7 @@ function updatePlayer(dt){
   if(len>0 || !player.onGround || myHP<=0){
     idleTimer = 0;
     regenTimer = 0;
-  } else if(myHP < PLAYER_MAX_HP){
+  } else if(myHP < PLAYER_MAX_HP && myHunger>0){
     idleTimer += dt;
     if(idleTimer >= REGEN_IDLE_DELAY){
       regenTimer += dt;
@@ -4347,11 +4415,21 @@ window.addEventListener('keyup', e=>{ keys[e.code]=false; });
 
 const isTouchDevice = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
 function doAttackOrBreak(){ if(!tryAttack()) breakBlock(); }
+function tryEatMeat(){
+  if(invCount(MEAT)<=0 || myHunger>=PLAYER_MAX_HUNGER) return;
+  invSub(MEAT,1);
+  saveInventory();
+  updateHotbarUI();
+  myHunger = Math.min(PLAYER_MAX_HUNGER, myHunger + MEAT_HUNGER_RESTORE);
+  updateHungerUI();
+  SFX.eat();
+}
 function doInteract(){
   const hit = raycastBlock();
   const hitBlock = hit ? getBlock(hit.x,hit.y,hit.z) : null;
   if(HOTBAR[selectedSlot]===FLINT){ tryIgniteFire(hit); return; }
   if(HOTBAR[selectedSlot]===FIREWORK){ launchFirework(); return; }
+  if(HOTBAR[selectedSlot]===MEAT){ tryEatMeat(); return; }
   if(hitBlock===CRAFTING_TABLE) openCrafting();
   else if(hitBlock in TOGGLE_MAP) toggleOpenable(hit.x, hit.y, hit.z, hitBlock);
   else placeBlock();
@@ -4870,6 +4948,7 @@ function init(){
   updateHotbarUI();
   updateHeldItemColor();
   updateHeartsUI();
+  updateHungerUI();
   initMultiplayer();
   // Firebase (when available) owns worm creation — see the 'world/worms' once('value') check in
   // initMultiplayer — so a fresh, unconnected worm doesn't pop into existence on every single client's
@@ -4922,6 +5001,7 @@ function animate(now){
   updateDayNight();
   updateWeather(dt);
   updateTemperature(dt);
+  updateHunger(dt);
   broadcastPosition(now);
 
   if(thirdPerson){
