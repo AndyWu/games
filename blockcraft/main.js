@@ -133,6 +133,7 @@ const ANIMAL_REAL_HEIGHT = {
 const MEAT_YIELD = { dog:1, sheep:1, lion:2, cow:2, giraffe:3, elephant:4,
   robin:1, sparrow:1, blue_jay:1, cardinal:1, crow:2, bluebird:1, finch:1, swallow:1, dove:1, woodpecker:1, owl:2, hawk:2, eagle:2, parrot:1, toucan:1, flamingo:2, hummingbird:1, kingfisher:1, heron:2, pelican:2, seagull:1, magpie:1, raven:2, wren:1, chickadee:1, oriole:1, warbler:1, swan:2, duck:1, goose:2,
   goldfish:1, bass:1, salmon:1, tuna:2, clownfish:1, catfish:1,
+  worm:1,
 };
 // Rough horizontal collision radius per species, used for entity-vs-entity collision below.
 const ANIMAL_RADIUS = {
@@ -2908,6 +2909,13 @@ function killWorm(w, fromRemote){
   scene.remove(w.mesh);
   const i = worms.indexOf(w);
   if(i>=0) worms.splice(i,1);
+  if(!fromRemote){
+    // Drop meat when a worm is squashed by the player (not from fire/remote deletion)
+    invAdd(MEAT, MEAT_YIELD.worm || 1);
+    saveInventory();
+    updateHotbarUI();
+    SFX.animalDeath();
+  }
   if(!fromRemote && fbReady) db.ref('world/worms/'+w.id).remove();
 }
 function updateWorms(dt){
@@ -2920,6 +2928,14 @@ function updateWorms(dt){
       if(Math.floor(w.x)===fx && Math.floor(w.y)===fy && Math.floor(w.z)===fz){ burned = true; break; }
     }
     if(burned){ killWorm(w); continue; }
+
+    // Squash worm if player steps on it
+    const dx = w.x - player.pos.x, dz = w.z - player.pos.z;
+    const dist = Math.hypot(dx, dz);
+    if(dist<0.4 && player.pos.y<=w.y && player.pos.y+player.height>=w.y){
+      killWorm(w);
+      continue;
+    }
 
     if(now - w.lastAteAt >= WORM_EAT_INTERVAL_MS){
       w.lastAteAt = now;
