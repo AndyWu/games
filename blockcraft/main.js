@@ -1088,6 +1088,7 @@ const player = {
   pos: new THREE.Vector3(0,0,0),
   vel: new THREE.Vector3(0,0,0),
   yaw: 0, pitch: 0, onGround: false, crawling: false, inWater: false,
+  canDoubleJump: false, spaceWasDown: false,
   width: 0.6, height: PLAYER_HEIGHT, eye: PLAYER_EYE,
 };
 // 10 fixed spawn points spread across the map, as fractions of WORLD_SIZE so they scale with it.
@@ -4079,6 +4080,17 @@ function updatePlayer(dt){
   if(inWater && !player.inWater) SFX.splash();
   player.inWater = inWater;
 
+  // Double jump: landing recharges one extra mid-air jump; pressing Space again while already
+  // airborne — a genuine fresh press, not just still holding it down from the first jump, which is
+  // why this needs edge detection rather than the ground jump's simpler "held + onGround" check —
+  // spends it for a second upward boost. It's applied on top of whatever vertical speed you already
+  // have at that moment, so timing the second press near the top of the first jump's arc reaches
+  // noticeably higher than a single jump ever could.
+  if(player.onGround) player.canDoubleJump = true;
+  const spaceDown = !!keys['Space'];
+  const spaceJustPressed = spaceDown && !player.spaceWasDown;
+  player.spaceWasDown = spaceDown;
+
   if(onLadder){
     // Climbing overrides gravity entirely — hold W/Space to go up, S to go down, let go to hang in
     // place, same feel as swimming.
@@ -4099,6 +4111,10 @@ function updatePlayer(dt){
     if(keys['Space'] && player.onGround){
       player.vel.y = JUMP_SPEED;
       player.onGround = false;
+      SFX.jump();
+    } else if(spaceJustPressed && !player.onGround && player.canDoubleJump){
+      player.vel.y = JUMP_SPEED;
+      player.canDoubleJump = false;
       SFX.jump();
     }
   }
