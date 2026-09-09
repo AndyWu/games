@@ -3286,6 +3286,40 @@ function buildButterflyTexture(seed){
   tex.generateMipmaps = false;
   return tex;
 }
+// A real 3D butterfly — not a camera-facing sprite — built the same way as the flame billboards
+// (MeshBasicMaterial + alphaTest, so the transparent background cuts out cleanly instead of z-fighting,
+// and DoubleSide so a paper-thin wing plane doesn't vanish from behind): two wing planes hinged on
+// their own pivots either side of a thin 3D body, so they open/close in a real up-down flap and read
+// as an actual silhouette from any angle, edge-on included, instead of a flat cutout that always faces
+// you. Reuses buildButterflyTexture's existing per-butterfly pattern — since that canvas is already
+// left/right symmetric (drawn from side=|x-center|), both wing planes just sample the same texture
+// half rather than needing two separate textures.
+function buildButterflyMesh(seed){
+  const tex = buildButterflyTexture(seed);
+  tex.repeat.set(0.5, 1);
+  tex.offset.set(0.5, 0); // one full wing lobe's worth of the (symmetric) artwork
+  const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, alphaTest: 0.3, side: THREE.DoubleSide });
+
+  const g = new THREE.Group();
+  const body = animalBox(0.035, 0.035, 0.5, new THREE.MeshBasicMaterial({ color: 0x241a14 }));
+  g.add(body);
+
+  const WING_W = 0.45, WING_H = 0.63;
+  const wings = [];
+  for(const side of [1,-1]){
+    const pivot = new THREE.Group();
+    const wingGeo = new THREE.PlaneGeometry(WING_W, WING_H);
+    wingGeo.translate(side*WING_W/2, 0, 0); // inner edge at the pivot (the body's spine), not centered
+    const wingMesh = new THREE.Mesh(wingGeo, mat);
+    pivot.add(wingMesh);
+    pivot.userData.side = side;
+    g.add(pivot);
+    wings.push(pivot);
+  }
+  g.userData.wings = wings;
+  g.userData.material = mat; // single shared material/texture, disposed once in killButterfly
+  return g;
+}
 // The x/z wander offset from wherever the butterfly was born, at a given elapsed time — split out so
 // butterflyPositionAt can subtract its own t=0 value and guarantee the flight path actually starts at
 // the origin point (see below) instead of teleporting to wherever a phase-shifted curve happens to be.
@@ -3324,14 +3358,11 @@ function butterflyPositionAt(seed, originX, originZ, elapsedS){
 function spawnButterfly(id,x,y,z,bornAt){
   if(butterflies.some(b=>b.id===id)) return null;
   const seed = hashIdToSeed(id);
-  const tex = buildButterflyTexture(seed);
-  const mat = new THREE.SpriteMaterial({ map:tex, transparent:true, alphaTest:0.3 });
-  const sprite = new THREE.Sprite(mat);
-  sprite.scale.set(0.9,0.63,1);
+  const mesh = buildButterflyMesh(seed);
   const p = butterflyPositionAt(seed, x, z, Math.max(0,(Date.now()-bornAt)/1000));
-  sprite.position.set(p.x,p.y,p.z);
-  scene.add(sprite);
-  const b = { id, mesh:sprite, seed, bornAt, originX:x, originZ:z };
+  mesh.position.set(p.x,p.y,p.z);
+  scene.add(mesh);
+  const b = { id, mesh, seed, bornAt, originX:x, originZ:z };
   butterflies.push(b);
   return b;
 }
@@ -3348,21 +3379,32 @@ function createButterfly(x,y,z){
 }
 function killButterfly(b, fromRemote){
   scene.remove(b.mesh);
-  b.mesh.material.map.dispose();
-  b.mesh.material.dispose();
+  b.mesh.userData.material.map.dispose();
+  b.mesh.userData.material.dispose();
   const i = butterflies.indexOf(b);
   if(i>=0) butterflies.splice(i,1);
   if(!fromRemote && fbReady) db.ref('world/butterflies/'+b.id).remove();
 }
+// A small time step used only to numerically estimate the flight direction (for facing yaw) from
+// butterflyPositionAt's layered drift+flutter curve — safer than hand-deriving an analytic velocity
+// for a function with this many mixed sin/cos terms, and cheap enough for the handful of butterflies
+// that ever exist at once.
+const BUTTERFLY_YAW_DT = 0.05;
 function updateButterflies(dt){
   const now = Date.now();
   const t = performance.now()/1000;
   for(const b of Array.from(butterflies)){
     if(now-b.bornAt>=BUTTERFLY_LIFESPAN_MS){ killButterfly(b); continue; }
-    const p = butterflyPositionAt(b.seed, b.originX, b.originZ, (now-b.bornAt)/1000);
+    const elapsedS = (now-b.bornAt)/1000;
+    const p = butterflyPositionAt(b.seed, b.originX, b.originZ, elapsedS);
     b.mesh.position.set(p.x,p.y,p.z);
-    const flap = 1 + Math.sin(t*9+b.seed)*0.18;
-    b.mesh.scale.set(0.9*flap, 0.63, 1);
+
+    const pNext = butterflyPositionAt(b.seed, b.originX, b.originZ, elapsedS+BUTTERFLY_YAW_DT);
+    const vx = pNext.x-p.x, vz = pNext.z-p.z;
+    if(vx*vx+vz*vz > 1e-8) b.mesh.rotation.y = Math.atan2(-vx,-vz);
+
+    const flap = Math.sin(t*9+b.seed)*0.9;
+    for(const wingPivot of b.mesh.userData.wings) wingPivot.rotation.z = wingPivot.userData.side*flap;
   }
 }
 
