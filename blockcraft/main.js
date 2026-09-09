@@ -3895,6 +3895,12 @@ function initMultiplayer(){
       if(b) killButterfly(b, true);
     });
 
+    db.ref('chat').limitToLast(CHAT_HISTORY_LIMIT).on('child_added', snap=>{
+      const val = snap.val();
+      if(!val || val.by===myId) return; // we already added our own message locally when we sent it
+      addChatMessage(val.name||'?', val.text||'');
+    });
+
     db.ref('players').on('child_added', snap=>{
       if(snap.key===myId) return;
       addRemotePlayer(snap.key, snap.val());
@@ -4325,6 +4331,12 @@ window.addEventListener('keydown', e=>{
   }
   if(e.code==='KeyV' && locked){ thirdPerson = !thirdPerson; return; }
   if(e.code==='KeyN' && locked){ cycleTimeMode(); return; }
+  if(e.code==='Enter'){
+    // Chat itself is focused while typing, so its own keydown listener (stopPropagation) handles
+    // Enter-to-send/Escape-to-cancel from here on — this only ever fires the "not open yet" case.
+    if(!chatOpen && !craftingOpen && !itemsOpen && locked && !isDead) openChat();
+    return;
+  }
   const slotIdx = HOTBAR_KEYS.indexOf(e.code);
   if(slotIdx>=0 && slotIdx<HOTBAR.length){
     selectedSlot = slotIdx; updateHotbarUI(); updateHeldItemColor();
@@ -4356,7 +4368,7 @@ nameInput.addEventListener('keydown', e=> e.stopPropagation());
 if(isTouchDevice){
   document.body.classList.add('touch-device');
   const controlsP = document.getElementById('controlsText');
-  if(controlsP) controlsP.innerHTML = 'A tiny Minecraft-inspired voxel sandbox that runs entirely in your browser.<br><br>Left stick: move &nbsp; Drag right side: look<br>⛏ break/attack &nbsp; ▦ place/interact &nbsp; JUMP jump &nbsp; CRAWL hold to crawl &nbsp; 3rd camera &nbsp; 🕐 cycle day/night';
+  if(controlsP) controlsP.innerHTML = 'A tiny Minecraft-inspired voxel sandbox that runs entirely in your browser.<br><br>Left stick: move &nbsp; Drag right side: look<br>⛏ break/attack &nbsp; ▦ place/interact &nbsp; JUMP jump &nbsp; CRAWL hold to crawl &nbsp; 3rd camera &nbsp; 🕐 cycle day/night &nbsp; 💬 chat';
   const tapP = document.getElementById('tapToPlay');
   if(tapP) tapP.innerHTML = '<strong>Tap anywhere to play</strong>';
   const hintP = document.getElementById('playHint');
@@ -4380,7 +4392,7 @@ overlay.addEventListener('click', ()=>{
 document.addEventListener('pointerlockchange', ()=>{
   if(isTouchDevice) return;
   locked = document.pointerLockElement === document.body;
-  overlay.hidden = locked || craftingOpen;
+  overlay.hidden = locked || craftingOpen || itemsOpen || chatOpen;
 });
 document.addEventListener('mousemove', e=>{
   if(!locked || isTouchDevice) return;
@@ -4476,6 +4488,7 @@ if(isTouchDevice){
   bindTouchButton('btnCrawl', ()=>{ keys['ControlLeft']=true; crawlBtn.classList.add('active'); }, ()=>{ keys['ControlLeft']=false; crawlBtn.classList.remove('active'); });
   bindTouchButton('btn3p', ()=>{ if(locked) thirdPerson = !thirdPerson; });
   bindTouchButton('btnTime', ()=>{ if(locked) cycleTimeMode(); });
+  bindTouchButton('btnChat', ()=>{ if(locked && !isDead) openChat(); });
 }
 
 // ---------- Debug panel (Alt+Shift+D) ----------
@@ -4725,6 +4738,76 @@ function renderItemsGrid(){
     rest.forEach(id => grid.appendChild(makeItemTile(id)));
   }
 }
+
+// ---------- Chat ----------
+// Enter opens a text box; Enter again sends, Escape cancels — the exact same exitPointerLock()-while-
+// open / requestPointerLock()-to-resume pattern crafting/items already use, so typing never fights
+// with WASD/mouse-look. The input itself stops its own keydown from bubbling to the game's global
+// handler (the same trick the pre-game name field already relies on), so none of the letters you type
+// ever get misread as a hotbar/inventory/craft shortcut.
+// Messages sync through Firebase under 'chat/<id>' like everything else in the shared world, read back
+// via a query capped to CHAT_HISTORY_LIMIT so a long-lived world's full chat history is never fully
+// downloaded or held in memory — only the most recent messages. A sent message is added to the local
+// log immediately (optimistic, matching how block edits/fireworks already work) and the 'by' field
+// lets the child_added listener recognize and skip its own message when Firebase echoes it back.
+const CHAT_HISTORY_LIMIT = 50;
+const CHAT_DISPLAY_LIMIT = 8; // how many recent lines actually stay on screen
+const CHAT_MIN_SEND_INTERVAL_MS = 600; // a light guard against accidental double-sends, not moderation
+let chatOpen = false;
+let lastChatSendAt = 0;
+const chatMessages = [];
+const chatLogEl = document.getElementById('chatLog');
+const chatInputBar = document.getElementById('chatInputBar');
+const chatInput = document.getElementById('chatInput');
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
+}
+function renderChatLog(){
+  chatLogEl.innerHTML = chatMessages.slice(-CHAT_DISPLAY_LIMIT)
+    .map(m => `<div class="chatLine"><b>${escapeHtml(m.name)}:</b> ${escapeHtml(m.text)}</div>`).join('');
+  chatLogEl.scrollTop = chatLogEl.scrollHeight;
+}
+function addChatMessage(name, text){
+  chatMessages.push({ name, text });
+  if(chatMessages.length > CHAT_HISTORY_LIMIT) chatMessages.shift();
+  renderChatLog();
+}
+function openChat(){
+  if(chatOpen || craftingOpen || itemsOpen || isDead) return;
+  chatOpen = true;
+  chatInputBar.hidden = false;
+  chatInput.value = '';
+  if(document.pointerLockElement) document.exitPointerLock();
+  if(isTouchDevice) locked = false;
+  overlay.hidden = true;
+  chatInput.focus();
+}
+function closeChat(relock){
+  chatOpen = false;
+  chatInputBar.hidden = true;
+  chatInput.blur();
+  if(relock){
+    if(isTouchDevice) locked = true;
+    else document.body.requestPointerLock();
+  } else if(!isTouchDevice) overlay.hidden = false;
+}
+function sendChatMessage(){
+  const text = chatInput.value.trim().slice(0,200);
+  const now = Date.now();
+  if(text && now-lastChatSendAt >= CHAT_MIN_SEND_INTERVAL_MS){
+    lastChatSendAt = now;
+    addChatMessage(myName, text);
+    if(fbReady) db.ref('chat').push({ name: myName, text, by: myId, t: firebase.database.ServerValue.TIMESTAMP });
+  }
+  closeChat(true);
+}
+chatInput.addEventListener('click', e=> e.stopPropagation());
+chatInput.addEventListener('touchstart', e=> e.stopPropagation());
+chatInput.addEventListener('keydown', e=>{
+  e.stopPropagation();
+  if(e.code==='Enter') sendChatMessage();
+  else if(e.code==='Escape') closeChat(true);
+});
 
 // ---------- Init & loop ----------
 function init(){

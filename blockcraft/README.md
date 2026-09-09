@@ -136,6 +136,8 @@ Everyone who loads the page connects to the same shared world via [Firebase Real
 
 Before you play, the start screen asks for a name (saved in this browser, so you only type it once). Every player has a floating name-and-HP tag over their head, visible to everyone else in the world and kept live as their health changes.
 
+Press `Enter` (or the 💬 button on touch) to open a chat box — type a message and press `Enter` again to send it to everyone currently online, or `Esc` to cancel. It releases the mouse while you're typing, the same as opening the crafting or inventory menu, and grabs it back automatically the moment you send. The last several messages stay on screen under the hotbar. Chat only keeps the most recent 50 messages in the shared world, so a long-lived game's history never piles up.
+
 To point the game at your own Firebase project:
 
 1. Create a free project at [console.firebase.google.com](https://console.firebase.google.com).
