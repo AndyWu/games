@@ -3155,45 +3155,61 @@ const BIRD_COUNT = BIRD_SPECIES.length * 2;
 const BIRD_RADIUS = 32; // recycle a bird's home once it's this far (x/z) from the player
 const BIRD_EARSHOT_RADIUS = 20; // only a bird within this many blocks of the player is ever heard
 const birds = [];
-const birdTexCache = new Map();
-function hexToCss(hex){ return '#'+hex.toString(16).padStart(6,'0'); }
-// A flat side-profile flying-bird silhouette (body + head/beak + tail + a shallow gull-wing "M" band)
-// — per-pixel, not canvas arcs (the lesson the ghost's tail taught early on) — reads correctly as a
-// bird at any billboard angle, and is cheap to share: one texture per species, cached, not per bird.
-function buildBirdTexture(species){
-  if(birdTexCache.has(species.id)) return birdTexCache.get(species.id);
-  const W=32, H=20;
-  const canvas = document.createElement('canvas');
-  canvas.width=W; canvas.height=H;
-  const ctx = canvas.getContext('2d');
-  const bodyStr = hexToCss(species.body), accentStr = hexToCss(species.accent);
-  const cx=W/2-1, cy=11;
-  for(let y=0;y<H;y++){
-    for(let x=0;x<W;x++){
-      const dx=x-cx, dy=y-cy;
-      const inBody = (dx*dx)/(6.2*6.2) + (dy*dy)/(3.4*3.4) < 1;
-      const hx=dx-6.5, hy=dy-0.5;
-      const inHead = hx*hx+hy*hy < 2.4*2.4;
-      const inBeak = dx>8 && dx<12.5 && Math.abs(dy-0.5-(dx-8)*0.12)<0.9;
-      const inTail = dx<-6 && dx>-11 && Math.abs(dy-(-6-dx)*0.22)<1.3;
-      const side = Math.abs(dx);
-      const wingDip = 2.6 - Math.min(side,13)*0.4;
-      const inWing = side>1.5 && side<14 && dy<0 && Math.abs(dy-(-wingDip))<1.3;
-      let color = null;
-      if(inBeak) color = '#e8a83d';
-      else if(inHead) color = bodyStr;
-      else if(inBody) color = (dy>0.5 && Math.abs(dx)<4.5) ? accentStr : bodyStr;
-      else if(inTail) color = accentStr;
-      else if(inWing) color = bodyStr;
-      if(color){ ctx.fillStyle = color; ctx.fillRect(x,y,1,1); }
-    }
+const birdMatCache = new Map(); // species.id -> {body, accent} materials, shared across that species' instances
+const birdBeakMat = new THREE.MeshLambertMaterial({ color: 0xe8a83d });
+function birdMaterials(species){
+  let m = birdMatCache.get(species.id);
+  if(!m){
+    m = { body: new THREE.MeshLambertMaterial({ color: species.body }), accent: new THREE.MeshLambertMaterial({ color: species.accent }) };
+    birdMatCache.set(species.id, m);
   }
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.magFilter = THREE.NearestFilter;
-  tex.minFilter = THREE.NearestFilter;
-  tex.generateMipmaps = false;
-  birdTexCache.set(species.id, tex);
-  return tex;
+  return m;
+}
+// A genuinely 3D low-poly bird — body/head/beak/tail plus two wings on flapping hinges, all simple
+// boxes composed into a THREE.Group, the exact same "compose primitives" approach the animal models
+// already use (see makeQuadruped/animalBox above). Replaces an earlier billboard-sprite version that
+// always faced the camera and read as a flat cutout from any angle other than straight-on; a real 3D
+// shape actually looks like a bird — and looks like a DIFFERENT bird depending which way you're
+// looking at it from — the way a sprite fundamentally can't.
+function buildBirdMesh(species){
+  const { body: bodyMat, accent: accentMat } = birdMaterials(species);
+  const g = new THREE.Group();
+
+  g.add(animalBox(0.22, 0.2, 0.42, bodyMat));
+  const belly = animalBox(0.17, 0.1, 0.26, accentMat);
+  belly.position.set(0, -0.09, 0.02);
+  g.add(belly);
+
+  const head = animalBox(0.15, 0.15, 0.15, bodyMat);
+  head.position.set(0, 0.09, -0.25); // -Z is "forward", matching the rest of this file's convention
+  g.add(head);
+  const beak = animalBox(0.05, 0.05, 0.13, birdBeakMat);
+  beak.position.set(0, 0.07, -0.38);
+  g.add(beak);
+
+  const tail = animalBox(0.05, 0.1, 0.24, accentMat);
+  tail.position.set(0, 0.02, 0.33);
+  tail.rotation.x = 0.2;
+  g.add(tail);
+
+  // Each wing is a box offset from its own pivot group, not centered on it, so rotating the pivot
+  // around Z swings the wing up/down about the shoulder like a real hinge instead of the wing's own
+  // center.
+  const wings = [];
+  for(const side of [1,-1]){
+    const pivot = new THREE.Group();
+    pivot.position.set(side*0.11, 0.03, 0);
+    const wing = animalBox(0.34, 0.03, 0.2, bodyMat);
+    wing.geometry.translate(side*0.17, 0, 0);
+    pivot.add(wing);
+    pivot.userData.side = side;
+    g.add(pivot);
+    wings.push(pivot);
+  }
+  g.userData.wings = wings;
+  g.scale.setScalar(species.size);
+  g.traverse(o => { if(o.isMesh) o.castShadow = true; });
+  return g;
 }
 function spawnBirdHome(b){
   const ang = Math.random()*Math.PI*2, r = 8+Math.random()*(BIRD_RADIUS-8);
@@ -3206,16 +3222,13 @@ function ensureBirds(){
   if(birds.length) return;
   for(let i=0;i<BIRD_COUNT;i++){
     const species = BIRD_SPECIES[i % BIRD_SPECIES.length];
-    const mat = new THREE.SpriteMaterial({ map: buildBirdTexture(species), transparent:true, alphaTest:0.3 });
-    const sprite = new THREE.Sprite(mat);
-    const s = 1.1*species.size;
-    sprite.scale.set(s, s*0.625, 1);
-    scene.add(sprite);
+    const mesh = buildBirdMesh(species);
+    scene.add(mesh);
     const b = {
-      sprite, species, homeX:0, homeZ:0, baseY:0,
+      mesh, species, homeX:0, homeZ:0, baseY:0,
       freqX: 0.15+Math.random()*0.2, freqY: 0.4+Math.random()*0.5, freqZ: 0.15+Math.random()*0.2,
       ampXZ: 5+Math.random()*7, ampY: 1+Math.random()*1.5, phase: Math.random()*Math.PI*2,
-      tweetTimer: 2+Math.random()*8, baseScaleX: s,
+      tweetTimer: 2+Math.random()*8, flapPhase: Math.random()*Math.PI*2, flapSpeed: 9+Math.random()*4,
     };
     spawnBirdHome(b);
     birds.push(b);
@@ -3227,12 +3240,19 @@ function updateBirds(dt){
   for(const b of birds){
     const dx = b.homeX-player.pos.x, dz = b.homeZ-player.pos.z;
     if(dx*dx+dz*dz > BIRD_RADIUS*BIRD_RADIUS) spawnBirdHome(b);
-    const x = b.homeX + Math.sin(t*b.freqX+b.phase)*b.ampXZ;
-    const z = b.homeZ + Math.cos(t*b.freqZ+b.phase*1.3)*b.ampXZ;
-    const y = Math.max(2, b.baseY + Math.sin(t*b.freqY+b.phase*0.7)*b.ampY);
-    b.sprite.position.set(x,y,z);
-    const vx = Math.cos(t*b.freqX+b.phase)*b.freqX*b.ampXZ; // face the way it's actually moving
-    b.sprite.scale.x = b.baseScaleX * (vx<0 ? -1 : 1);
+    const ax = t*b.freqX+b.phase, az = t*b.freqZ+b.phase*1.3, ay = t*b.freqY+b.phase*0.7;
+    const x = b.homeX + Math.sin(ax)*b.ampXZ;
+    const z = b.homeZ + Math.cos(az)*b.ampXZ;
+    const y = Math.max(2, b.baseY + Math.sin(ay)*b.ampY);
+    b.mesh.position.set(x,y,z);
+    // Face the direction it's actually moving — the analytic derivative of the x/z formulas above —
+    // using the same atan2(-vx,-vz) convention the player itself uses for yaw-from-forward-vector.
+    const vx = Math.cos(ax)*b.freqX*b.ampXZ, vz = -Math.sin(az)*b.freqZ*b.ampXZ;
+    if(vx*vx+vz*vz > 0.0001) b.mesh.rotation.y = Math.atan2(-vx,-vz);
+
+    b.flapPhase += dt*b.flapSpeed;
+    const flap = Math.sin(b.flapPhase)*0.9;
+    for(const wingPivot of b.mesh.userData.wings) wingPivot.rotation.z = wingPivot.userData.side*flap;
 
     b.tweetTimer -= dt;
     if(b.tweetTimer<=0){
@@ -3262,8 +3282,11 @@ const FISH_COUNT = FISH_SPECIES.length * 4;
 const FISH_RADIUS = 26;
 const fish = [];
 const fishTexCache = new Map();
-// A flat side-profile torpedo body + tail fin + a small dorsal bump — same per-pixel, one-per-species
-// approach as buildBirdTexture.
+function hexToCss(hex){ return '#'+hex.toString(16).padStart(6,'0'); }
+// A flat side-profile torpedo body + tail fin + a small dorsal bump — per-pixel, one texture per
+// species, cached and shared across every fish of that species (birds moved to real 3D geometry so
+// they read correctly from any angle, but fish stay underwater sprites — you mostly see them from
+// roughly the side/above through the water surface, where a flat cutout still reads fine).
 function buildFishTexture(species){
   if(fishTexCache.has(species.id)) return fishTexCache.get(species.id);
   const W=24, H=14;
