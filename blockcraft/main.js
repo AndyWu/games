@@ -4552,5 +4552,37 @@ function animate(now){
     if(debugPanelTimer<=0){ debugPanelTimer = 2; renderDebugPanel(); }
   }
 }
+
+// ---------- Update checker ----------
+// Detects when a newer build has been deployed while this tab is still open, and shows a small
+// persistent banner nudging the player to reload — the exact class of confusion a stale cached script
+// has caused before in this project (fireworks that seemed not to sync, a hotkey that silently did
+// nothing), just surfaced proactively instead of debugged after the fact. No version number to
+// remember to bump by hand: it just compares main.js's own ETag/Last-Modified HTTP header against
+// whatever it was the last time this tab checked. If neither header is available (some local dev
+// servers, or a fetch that fails for any reason) it silently does nothing rather than false-alarm.
+const UPDATE_CHECK_INTERVAL_MS = 5*60*1000; // every 5 real minutes
+let currentBuildTag = null;
+async function fetchBuildTag(){
+  try{
+    const res = await fetch('main.js', { method:'HEAD', cache:'no-store' });
+    if(!res.ok) return null;
+    return res.headers.get('etag') || res.headers.get('last-modified') || null;
+  }catch(e){ return null; }
+}
+async function checkForUpdate(){
+  const tag = await fetchBuildTag();
+  if(!tag) return;
+  if(currentBuildTag===null){ currentBuildTag = tag; return; } // first successful check just sets the baseline
+  if(tag !== currentBuildTag){
+    const banner = document.getElementById('updateBanner');
+    if(banner) banner.hidden = false;
+  }
+}
+const updateReloadBtn = document.getElementById('updateReloadBtn');
+if(updateReloadBtn) updateReloadBtn.addEventListener('click', ()=> location.reload());
+checkForUpdate();
+setInterval(checkForUpdate, UPDATE_CHECK_INTERVAL_MS);
+
 init();
 })();
