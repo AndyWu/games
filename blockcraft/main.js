@@ -2145,7 +2145,21 @@ function lerpColorHex(a,b,t){
   const br=(b>>16)&255, bg=(b>>8)&255, bb=b&255;
   return (Math.round(ar+(br-ar)*t)<<16) | (Math.round(ag+(bg-ag)*t)<<8) | Math.round(ab+(bb-ab)*t);
 }
-function currentDayTime(){ return (Date.now()/1000 % DAY_LENGTH_S) / DAY_LENGTH_S; }
+// 'regular' (the normal wall-clock cycle), 'day' (frozen at noon), or 'night' (frozen at midnight) —
+// toggled with N (see the keydown handler). Every consumer of currentDayTime() — sky/lighting, the
+// sun/moon, the temperature swing, firefly/ghost night visibility, and the HH:MM World Time HUD label
+// — reads it through this one function, so forcing it here is enough to make all of them agree.
+let timeMode = 'regular';
+function currentDayTime(){
+  if(timeMode==='day') return 0.5;
+  if(timeMode==='night') return 0;
+  return (Date.now()/1000 % DAY_LENGTH_S) / DAY_LENGTH_S;
+}
+function cycleTimeMode(){
+  timeMode = timeMode==='regular' ? 'day' : timeMode==='day' ? 'night' : 'regular';
+  const el = document.getElementById('timeModeLabel');
+  if(el) el.textContent = timeMode==='day' ? ' ☀️ forced day' : timeMode==='night' ? ' 🌙 forced night' : '';
+}
 
 // ---------- Calendar: Year/Month/Day, anchored to a specific real-world instant ----------
 // A parallel, purely cosmetic calendar for the HUD date — it doesn't feed into season/temperature/
@@ -3983,6 +3997,7 @@ window.addEventListener('keydown', e=>{
     return;
   }
   if(e.code==='KeyV' && locked){ thirdPerson = !thirdPerson; return; }
+  if(e.code==='KeyN' && locked){ cycleTimeMode(); return; }
   const slotIdx = HOTBAR_KEYS.indexOf(e.code);
   if(slotIdx>=0 && slotIdx<HOTBAR.length){
     selectedSlot = slotIdx; updateHotbarUI(); updateHeldItemColor();
@@ -4014,7 +4029,7 @@ nameInput.addEventListener('keydown', e=> e.stopPropagation());
 if(isTouchDevice){
   document.body.classList.add('touch-device');
   const controlsP = document.getElementById('controlsText');
-  if(controlsP) controlsP.innerHTML = 'A tiny Minecraft-inspired voxel sandbox that runs entirely in your browser.<br><br>Left stick: move &nbsp; Drag right side: look<br>⛏ break/attack &nbsp; ▦ place/interact &nbsp; JUMP jump &nbsp; CRAWL hold to crawl &nbsp; 3rd camera';
+  if(controlsP) controlsP.innerHTML = 'A tiny Minecraft-inspired voxel sandbox that runs entirely in your browser.<br><br>Left stick: move &nbsp; Drag right side: look<br>⛏ break/attack &nbsp; ▦ place/interact &nbsp; JUMP jump &nbsp; CRAWL hold to crawl &nbsp; 3rd camera &nbsp; 🕐 cycle day/night';
   const tapP = document.getElementById('tapToPlay');
   if(tapP) tapP.innerHTML = '<strong>Tap anywhere to play</strong>';
   const hintP = document.getElementById('playHint');
@@ -4133,6 +4148,7 @@ if(isTouchDevice){
   const crawlBtn = document.getElementById('btnCrawl');
   bindTouchButton('btnCrawl', ()=>{ keys['ControlLeft']=true; crawlBtn.classList.add('active'); }, ()=>{ keys['ControlLeft']=false; crawlBtn.classList.remove('active'); });
   bindTouchButton('btn3p', ()=>{ if(locked) thirdPerson = !thirdPerson; });
+  bindTouchButton('btnTime', ()=>{ if(locked) cycleTimeMode(); });
 }
 
 // ---------- Debug panel (Alt+Shift+D) ----------
