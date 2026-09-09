@@ -129,8 +129,11 @@ const ANIMAL_REAL_HEIGHT = {
 };
 // How much Meat killing each animal drops, non-decreasing with its real size above (dog/sheep are the
 // smallest, elephant the biggest) — not a strict formula, just hand-picked round numbers in the same
-// order.
-const MEAT_YIELD = { dog:1, sheep:1, lion:2, cow:2, giraffe:3, elephant:4 };
+// order. Birds/fish scale by size too: large flying/aquatic species (eagle, swan, tuna) drop 2.
+const MEAT_YIELD = { dog:1, sheep:1, lion:2, cow:2, giraffe:3, elephant:4,
+  robin:1, sparrow:1, blue_jay:1, cardinal:1, crow:2, bluebird:1, finch:1, swallow:1, dove:1, woodpecker:1, owl:2, hawk:2, eagle:2, parrot:1, toucan:1, flamingo:2, hummingbird:1, kingfisher:1, heron:2, pelican:2, seagull:1, magpie:1, raven:2, wren:1, chickadee:1, oriole:1, warbler:1, swan:2, duck:1, goose:2,
+  goldfish:1, bass:1, salmon:1, tuna:2, clownfish:1, catfish:1,
+};
 // Rough horizontal collision radius per species, used for entity-vs-entity collision below.
 const ANIMAL_RADIUS = {
   sheep: 0.35, dog: 0.22, cow: 0.5, giraffe: 0.5, lion: 0.4, elephant: 0.95,
@@ -1610,6 +1613,20 @@ function damageAnimal(a, dmg){
     killAnimal(a);
   }
 }
+function damageBirdOrFish(entity, dmg, type){
+  entity.hp = Math.max(0, entity.hp - dmg);
+  if(entity.hp<=0){
+    SFX.animalDeath();
+    const speciesId = entity.species.id;
+    invAdd(MEAT, MEAT_YIELD[speciesId] || 1);
+    saveInventory();
+    updateHotbarUI();
+    scene.remove(entity.mesh);
+    const arr = type==='bird' ? birds : fish;
+    const idx = arr.indexOf(entity);
+    if(idx>=0) arr.splice(idx, 1);
+  }
+}
 function applyRemoteMobHp(id, hp){
   const a = animals.find(x=>x.id===id);
   if(!a || hp==null || hp===a.hp) return;
@@ -1971,6 +1988,20 @@ function findAttackTarget(){
     const dot = (dx/dist)*dir.x + (dy/dist)*dir.y + (dz/dist)*dir.z;
     if(dot>ATTACK_ANGLE_COS){ best = {type:'animal', ref:a}; bestDist = dist; }
   });
+  birds.forEach(b=>{
+    const dx=b.mesh.position.x-origin.x, dy=(b.mesh.position.y)-origin.y, dz=b.mesh.position.z-origin.z;
+    const dist = Math.hypot(dx,dy,dz);
+    if(dist>ATTACK_RANGE || dist>=bestDist) return;
+    const dot = (dx/dist)*dir.x + (dy/dist)*dir.y + (dz/dist)*dir.z;
+    if(dot>ATTACK_ANGLE_COS){ best = {type:'bird', ref:b}; bestDist = dist; }
+  });
+  fish.forEach(f=>{
+    const dx=f.mesh.position.x-origin.x, dy=(f.mesh.position.y)-origin.y, dz=f.mesh.position.z-origin.z;
+    const dist = Math.hypot(dx,dy,dz);
+    if(dist>ATTACK_RANGE || dist>=bestDist) return;
+    const dot = (dx/dist)*dir.x + (dy/dist)*dir.y + (dz/dist)*dir.z;
+    if(dot>ATTACK_ANGLE_COS){ best = {type:'fish', ref:f}; bestDist = dist; }
+  });
   remotePlayers.forEach((e,id)=>{
     const dx=e.mesh.position.x-origin.x, dy=(e.mesh.position.y+1.0)-origin.y, dz=e.mesh.position.z-origin.z;
     const dist = Math.hypot(dx,dy,dz);
@@ -1997,6 +2028,8 @@ function tryAttack(){
     SFX.swing();
     SFX.hitAnimal();
     if(target.type==='animal') damageAnimal(target.ref, PLAYER_ATTACK_DMG);
+    else if(target.type==='bird') damageBirdOrFish(target.ref, PLAYER_ATTACK_DMG, 'bird');
+    else if(target.type==='fish') damageBirdOrFish(target.ref, PLAYER_ATTACK_DMG, 'fish');
     else damageRemotePlayer(target.id, target.ref, PLAYER_ATTACK_DMG);
   }
   return true;
@@ -3284,8 +3317,16 @@ function spawnBirdHome(b){
   const ang = Math.random()*Math.PI*2, r = 8+Math.random()*(BIRD_RADIUS-8);
   const x = player.pos.x + Math.cos(ang)*r;
   const z = player.pos.z + Math.sin(ang)*r;
-  b.homeX = x; b.homeZ = z;
-  b.baseY = heightAt(Math.floor(x), Math.floor(z)) + 6 + Math.random()*8; // above the canopy line
+  const targetBaseY = heightAt(Math.floor(x), Math.floor(z)) + 6 + Math.random()*8; // above the canopy line
+  // Smoothly transition to a new home over 1.5 seconds instead of teleporting instantly
+  b.homeXTarget = x; b.homeZTarget = z; b.baseYTarget = targetBaseY;
+  b.transitionTime = 1.5; b.transitionElapsed = 0;
+  // Initialize on first spawn
+  if(b.homeX===0 && b.homeZ===0){
+    b.homeX = x; b.homeZ = z; b.baseY = targetBaseY;
+    b.homeXTarget = x; b.homeZTarget = z; b.baseYTarget = targetBaseY;
+    b.transitionTime = 0;
+  }
 }
 function ensureBirds(){
   if(birds.length) return;
@@ -3295,6 +3336,7 @@ function ensureBirds(){
     scene.add(mesh);
     const b = {
       mesh, species, homeX:0, homeZ:0, baseY:0,
+      hp: 2, maxHp: 2,
       freqX: 0.15+Math.random()*0.2, freqY: 0.4+Math.random()*0.5, freqZ: 0.15+Math.random()*0.2,
       ampXZ: 5+Math.random()*7, ampY: 1+Math.random()*1.5, phase: Math.random()*Math.PI*2,
       tweetTimer: 2+Math.random()*8, flapPhase: Math.random()*Math.PI*2, flapSpeed: 9+Math.random()*4,
@@ -3307,7 +3349,16 @@ function updateBirds(dt){
   ensureBirds();
   const t = performance.now()/1000;
   for(const b of birds){
-    const dx = b.homeX-player.pos.x, dz = b.homeZ-player.pos.z;
+    // Smooth transition to new home point over 1.5 seconds
+    if(b.transitionTime > 0){
+      b.transitionElapsed += dt;
+      const alpha = Math.min(1, b.transitionElapsed / b.transitionTime);
+      b.homeX += (b.homeXTarget - b.homeX) * alpha;
+      b.homeZ += (b.homeZTarget - b.homeZ) * alpha;
+      b.baseY += (b.baseYTarget - b.baseY) * alpha;
+    }
+
+    const dx = b.homeXTarget-player.pos.x, dz = b.homeZTarget-player.pos.z;
     if(dx*dx+dz*dz > BIRD_RADIUS*BIRD_RADIUS) spawnBirdHome(b);
     const ax = t*b.freqX+b.phase, az = t*b.freqZ+b.phase*1.3, ay = t*b.freqY+b.phase*0.7;
     const x = b.homeX + Math.sin(ax)*b.ampXZ;
@@ -3416,13 +3467,18 @@ function spawnFishHome(f){
   const spot = findFishSpot();
   if(!spot){ f.hasHome = false; f.mesh.visible = false; return; }
   f.hasHome = true; f.mesh.visible = true;
-  f.homeX = spot.x; f.homeZ = spot.z; f.bottom = spot.bottom; f.top = spot.top;
-  // Center of the column's actual water depth (spot.top - spot.bottom + 1 blocks, inclusive) —
-  // written this way rather than a min/max clamp so it stays correct even for a 1-block-deep
-  // shoreline column (bottom===top), where an earlier version of this clamp could compute a baseY
-  // that floored to the sand below the water instead of the water block itself.
+  f.bottom = spot.bottom; f.top = spot.top;
   const depth = spot.top - spot.bottom + 1;
-  f.baseY = spot.bottom + depth/2;
+  const targetBaseY = spot.bottom + depth/2;
+  // Smoothly transition to a new home over 1.5 seconds instead of teleporting instantly
+  f.homeXTarget = spot.x; f.homeZTarget = spot.z; f.baseYTarget = targetBaseY;
+  f.transitionTime = 1.5; f.transitionElapsed = 0;
+  // Initialize on first spawn
+  if(f.homeX===0 && f.homeZ===0){
+    f.homeX = spot.x; f.homeZ = spot.z; f.baseY = targetBaseY;
+    f.homeXTarget = spot.x; f.homeZTarget = spot.z; f.baseYTarget = targetBaseY;
+    f.transitionTime = 0;
+  }
 }
 function ensureFish(){
   if(fish.length) return;
@@ -3432,6 +3488,7 @@ function ensureFish(){
     scene.add(mesh);
     const f = {
       mesh, species, homeX:0, homeZ:0, bottom:1, top:1, baseY:1, hasHome:false,
+      hp: 1, maxHp: 1,
       freqX: 0.2+Math.random()*0.3, freqZ: 0.2+Math.random()*0.3,
       ampXZ: 1.5+Math.random()*2.5, phase: Math.random()*Math.PI*2,
       vertPeriod: 6+Math.random()*10, vertPhase: Math.random()*Math.PI*2,
@@ -3446,7 +3503,17 @@ function updateFish(dt){
   const t = performance.now()/1000;
   for(const f of fish){
     if(!f.hasHome){ spawnFishHome(f); if(!f.hasHome) continue; }
-    const dx = f.homeX-player.pos.x, dz = f.homeZ-player.pos.z;
+
+    // Smooth transition to new home point over 1.5 seconds
+    if(f.transitionTime > 0){
+      f.transitionElapsed += dt;
+      const alpha = Math.min(1, f.transitionElapsed / f.transitionTime);
+      f.homeX += (f.homeXTarget - f.homeX) * alpha;
+      f.homeZ += (f.homeZTarget - f.homeZ) * alpha;
+      f.baseY += (f.baseYTarget - f.baseY) * alpha;
+    }
+
+    const dx = f.homeXTarget-player.pos.x, dz = f.homeZTarget-player.pos.z;
     if(dx*dx+dz*dz > FISH_RADIUS*FISH_RADIUS){ spawnFishHome(f); if(!f.hasHome) continue; }
     const ax = t*f.freqX+f.phase, az = t*f.freqZ+f.phase*1.3;
     let x = f.homeX + Math.sin(ax)*f.ampXZ;
