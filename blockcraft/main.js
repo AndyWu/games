@@ -88,6 +88,11 @@ const ATTACK_RANGE = 4;
 const ATTACK_ANGLE_COS = Math.cos(30 * Math.PI/180);
 const AGGRO_RADIUS = 6;
 const DEAGGRO_RADIUS = 11;
+// How much further (in real 3D distance) a hostile animal can still lunge and land a hit once it's
+// physically blocked from walking any closer — see updateAnimal. Keeps a short elevated ledge or a
+// couple steps into deeper water from being free, permanent safety, while a large height gap (well up
+// a cliff, far out over open water) still keeps a player genuinely out of reach.
+const ANIMAL_LUNGE_RANGE = 2.5;
 const RETALIATE_MS = 8000;
 const FALL_DAMAGE_FREE_BLOCKS = 3; // first 3 blocks of any fall are damage-free, like stepping down normally
 
@@ -1586,12 +1591,28 @@ function updateAnimal(a, dt){
     if(distToPlayer > 0.05){
       const nx = dxp/distToPlayer, nz = dzp/distToPlayer;
       a.yaw = Math.atan2(-nx, -nz);
-      if(distToPlayer > ATTACK_RANGE*0.4 + stats.reach){
+      const attackRange = ATTACK_RANGE*0.4 + stats.reach;
+      if(distToPlayer <= attackRange){
+        // Close enough by the ordinary walk-up rule — same as always.
+        if(a.attackCooldown<=0){ damagePlayer(stats.dmg, a.type); a.attackCooldown = 1.1; }
+      } else if(animalStepBlocked(a.x+nx*0.3, a.z+nz*0.3, a.y)){
+        // Can't actually step any closer along the ground — a real height drop (deep water, a ledge,
+        // a low wall) is in the way, not just "hasn't walked over yet." Previously this meant the
+        // animal just got stuck pacing at the edge forever, unable to ever close enough for the plain
+        // horizontal check above to pass, so a player standing just past any such edge was permanently
+        // safe regardless of how close that edge actually put them. Now, still blocked, it can lunge:
+        // if the player is within a generous pounce range measured in real 3D space (so a large height
+        // gap — well up a cliff — still keeps them out of reach, while a short elevated ledge or a
+        // couple steps into deeper water doesn't), it reaches out and lands a hit from where it stands.
+        const dyp = player.pos.y - a.y;
+        const distToPlayer3D = Math.hypot(dxp, dyp, dzp);
+        if(distToPlayer3D <= attackRange + ANIMAL_LUNGE_RANGE && a.attackCooldown<=0){
+          damagePlayer(stats.dmg, a.type);
+          a.attackCooldown = 1.1;
+        }
+      } else {
         stepAnimal(a, nx*stats.chaseSpeed*dt, nz*stats.chaseSpeed*dt);
         moving = true;
-      } else if(a.attackCooldown<=0){
-        damagePlayer(stats.dmg, a.type);
-        a.attackCooldown = 1.1;
       }
     }
   } else {
@@ -3580,6 +3601,9 @@ function birdMaterials(species){
   let m = birdMatCache.get(species.id);
   if(!m){
     m = { body: new THREE.MeshLambertMaterial({ color: species.body }), accent: new THREE.MeshLambertMaterial({ color: species.accent }) };
+    // species.head is optional — only a bald-eagle-style distinct head color (the Giant Eagle) sets
+    // it; every regular species falls back to the same body material its wings/torso already use.
+    m.head = species.head!=null ? new THREE.MeshLambertMaterial({ color: species.head }) : m.body;
     birdMatCache.set(species.id, m);
   }
   return m;
@@ -3591,7 +3615,7 @@ function birdMaterials(species){
 // shape actually looks like a bird — and looks like a DIFFERENT bird depending which way you're
 // looking at it from — the way a sprite fundamentally can't.
 function buildBirdMesh(species){
-  const { body: bodyMat, accent: accentMat } = birdMaterials(species);
+  const { body: bodyMat, accent: accentMat, head: headMat } = birdMaterials(species);
   const g = new THREE.Group();
 
   g.add(animalBox(0.22, 0.2, 0.42, bodyMat));
@@ -3599,7 +3623,7 @@ function buildBirdMesh(species){
   belly.position.set(0, -0.09, 0.02);
   g.add(belly);
 
-  const head = animalBox(0.15, 0.15, 0.15, bodyMat);
+  const head = animalBox(0.15, 0.15, 0.15, headMat);
   head.position.set(0, 0.09, -0.25); // -Z is "forward", matching the rest of this file's convention
   g.add(head);
   const beak = animalBox(0.05, 0.05, 0.13, birdBeakMat);
@@ -3728,7 +3752,10 @@ function updateBirds(dt){
 // reasoning as birds eating worms below WORM_MIN_POPULATION_FOR_PREDATION). They're themselves
 // attackable and drop Meat like every other creature here.
 const BIG_EAGLE_COUNT = 2;
-const BIG_EAGLE_SPECIES = { id:'bigeagle', name:'Giant Eagle', body:0x4a3a2a, accent:0xe8dcc8, size:3.0, pitch:0.4 };
+// Classic bald-eagle coloring: near-black body/wings, a white head (birdMaterials' optional `head`
+// override — every regular bird species omits it and just reuses its body color), and the golden
+// beak every bird already has for free (birdBeakMat, shared globally).
+const BIG_EAGLE_SPECIES = { id:'bigeagle', name:'Giant Eagle', body:0x1c1c1c, accent:0xe8dcc8, head:0xf5f2e8, size:3.0, pitch:0.4 };
 const BIG_EAGLE_RADIUS = 40;
 const BIG_EAGLE_HUNT_INTERVAL_MS = DAY_LENGTH_S*1000; // once per in-game day
 const BIG_EAGLE_HUNT_RADIUS = 15;
