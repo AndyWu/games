@@ -5466,7 +5466,20 @@ overlay.addEventListener('click', ()=>{
     overlay.hidden = true;
     touchControls.hidden = false;
   } else {
-    document.body.requestPointerLock();
+    // requestPointerLock() can silently fail (browser rate-limiting a rapid re-request, a focus
+    // quirk, etc.) without ever firing 'pointerlockchange' — and since that event is the only place
+    // `locked`/overlay.hidden normally get set, a failed request used to leave the game stuck at this
+    // menu forever: WASD does nothing (updatePlayer is gated on `locked`), while animals, birds and
+    // day/night keep animating behind the overlay, which reads just like the game hanging. Catch a
+    // rejection and fall back to unblocking movement/attack directly — mouse-look may need one more
+    // click to actually engage, but the game is never stuck unresponsive because of it.
+    const req = document.body.requestPointerLock();
+    if(req && typeof req.catch==='function'){
+      req.catch(()=>{
+        locked = true;
+        overlay.hidden = true;
+      });
+    }
   }
 });
 document.addEventListener('pointerlockchange', ()=>{
