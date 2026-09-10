@@ -1635,7 +1635,13 @@ function updateAnimal(a, dt){
       const nx = dxp/distToPlayer, nz = dzp/distToPlayer;
       a.yaw = Math.atan2(-nx, -nz);
       const attackRange = ATTACK_RANGE*0.4 + stats.reach;
-      if(distToPlayer <= attackRange){
+      // Horizontal-only on its own has no ceiling on height at all — a player passing directly over an
+      // animal (e.g. riding a Giant Eagle high overhead) would read as "close enough" purely because
+      // dx/dz are small, letting ground animals hit a player who's nowhere near them vertically. Capping
+      // the vertical gap to the same generous attackRange keeps the original fix (a short ledge or a
+      // couple steps into deep water is still in reach) while ruling out anything actually far overhead.
+      const dyp = player.pos.y - a.y;
+      if(distToPlayer <= attackRange && Math.abs(dyp) <= attackRange){
         // Close enough by the ordinary walk-up rule — same as always.
         if(a.attackCooldown<=0){ damagePlayer(stats.dmg, a.type); a.attackCooldown = 1.1; }
       } else if(animalStepBlocked(a.x+nx*0.3, a.z+nz*0.3, a.y)){
@@ -1647,7 +1653,6 @@ function updateAnimal(a, dt){
         // if the player is within a generous pounce range measured in real 3D space (so a large height
         // gap — well up a cliff — still keeps them out of reach, while a short elevated ledge or a
         // couple steps into deeper water doesn't), it reaches out and lands a hit from where it stands.
-        const dyp = player.pos.y - a.y;
         const distToPlayer3D = Math.hypot(dxp, dyp, dzp);
         if(distToPlayer3D <= attackRange + ANIMAL_LUNGE_RANGE && a.attackCooldown<=0){
           damagePlayer(stats.dmg, a.type);
