@@ -3621,16 +3621,19 @@ function updateGhost(dt){
 
 // Shared by every ambient creature below (birds, fish, turtles, Giant Eagles) that recycles its "home"
 // point to a fresh spot near the player once the old one falls too far away, then glides there smoothly
-// over a fixed window rather than teleporting. A fixed window works fine for an ordinary recycle (a
-// short hop at the edge of its radius), but the player can now cover real distance fast — sprinting,
-// swimming, or riding a Giant Eagle on a long tour — so a home that's fallen far behind can get recycled
-// to a spot near the player's new, much more distant position, and cramming that whole gap into the same
-// short fixed window made it look like the creature was suddenly dashing clear across the map. Scaling
-// the transition time by the actual distance (at a believable cruising speed, floored so a short recycle
-// still gets its usual quick animation) keeps every relocation at a consistent, natural pace no matter
-// how far the new spot ends up being.
-function relocateTransitionTime(fromX, fromZ, toX, toZ, cruiseSpeed, minTime){
-  return Math.max(minTime, Math.hypot(toX-fromX, toZ-fromZ) / cruiseSpeed);
+// over a short fixed window rather than teleporting. That's the right call for an ordinary recycle (a
+// short hop at the edge of its radius) — but the update loop's home += (target-home)*alpha formula is
+// an ease-in curve, not constant speed: regardless of how long the window nominally is, the bulk of the
+// distance gets covered in roughly its first sqrt(time) fraction. So once the player covers real ground
+// fast — sprinting, swimming, or riding a Giant Eagle on a long tour — and a home that's fallen far
+// behind gets recycled toward the player's new, much more distant position, simply lengthening the
+// window (an earlier attempt at this) barely helps: nearly all of a 500-block gap still closes in the
+// first few seconds no matter what the window is set to, so it still reads as a sudden warp — and with
+// the player still moving, it can retrigger and do it again every few seconds. Past a small multiple of
+// the creature's normal radius, it's better to just re-materialize instantly at the new spot, exactly
+// like a creature's very first spawn — nobody is watching it continuously across a gap that size anyway.
+function relocateTransitionTime(fromX, fromZ, toX, toZ, radius, baseTime){
+  return Math.hypot(toX-fromX, toZ-fromZ) > radius*3 ? 0 : baseTime;
 }
 
 // ---------- Birds: 30 flyable species, ambient wildlife that circles nearby and occasionally tweets ----------
@@ -3748,11 +3751,12 @@ function spawnBirdHome(b){
   const z = player.pos.z + Math.sin(ang)*r;
   const targetBaseY = heightAt(Math.floor(x), Math.floor(z)) + 6 + Math.random()*8; // above the canopy line
   // Smoothly transition to a new home instead of teleporting instantly — see relocateTransitionTime.
-  b.transitionTime = relocateTransitionTime(b.homeX, b.homeZ, x, z, 20, 1.5);
+  b.transitionTime = relocateTransitionTime(b.homeX, b.homeZ, x, z, BIRD_RADIUS, 1.5);
   b.homeXTarget = x; b.homeZTarget = z; b.baseYTarget = targetBaseY;
   b.transitionElapsed = 0;
-  // Initialize on first spawn
-  if(b.homeX===0 && b.homeZ===0){
+  // First spawn, or the gap is large enough that animating it would look like a warp either way —
+  // just re-materialize there directly instead of easing toward it.
+  if((b.homeX===0 && b.homeZ===0) || b.transitionTime===0){
     b.homeX = x; b.homeZ = z; b.baseY = targetBaseY;
     b.homeXTarget = x; b.homeZTarget = z; b.baseYTarget = targetBaseY;
     b.transitionTime = 0;
@@ -3863,10 +3867,10 @@ function spawnBigEagleHome(e){
   const x = player.pos.x + Math.cos(ang)*r;
   const z = player.pos.z + Math.sin(ang)*r;
   const targetBaseY = heightAt(Math.floor(x), Math.floor(z)) + 10 + Math.random()*10; // soars higher than regular birds
-  e.transitionTime = relocateTransitionTime(e.homeX, e.homeZ, x, z, EAGLE_TOUR_SPEED, 2);
+  e.transitionTime = relocateTransitionTime(e.homeX, e.homeZ, x, z, BIG_EAGLE_RADIUS, 2);
   e.homeXTarget = x; e.homeZTarget = z; e.baseYTarget = targetBaseY;
   e.transitionElapsed = 0;
-  if(e.homeX===0 && e.homeZ===0){
+  if((e.homeX===0 && e.homeZ===0) || e.transitionTime===0){
     e.homeX = x; e.homeZ = z; e.baseY = targetBaseY;
     e.homeXTarget = x; e.homeZTarget = z; e.baseYTarget = targetBaseY;
     e.transitionTime = 0;
@@ -4069,11 +4073,11 @@ function spawnFishHome(f){
   const depth = spot.top - spot.bottom + 1;
   const targetBaseY = spot.bottom + depth/2;
   // Smoothly transition to a new home instead of teleporting instantly — see relocateTransitionTime.
-  f.transitionTime = relocateTransitionTime(f.homeX, f.homeZ, spot.x, spot.z, 14, 1.5);
+  f.transitionTime = relocateTransitionTime(f.homeX, f.homeZ, spot.x, spot.z, FISH_RADIUS, 1.5);
   f.homeXTarget = spot.x; f.homeZTarget = spot.z; f.baseYTarget = targetBaseY;
   f.transitionElapsed = 0;
-  // Initialize on first spawn
-  if(f.homeX===0 && f.homeZ===0){
+  // First spawn, or the gap is large enough that animating it would look like a warp either way.
+  if((f.homeX===0 && f.homeZ===0) || f.transitionTime===0){
     f.homeX = spot.x; f.homeZ = spot.z; f.baseY = targetBaseY;
     f.homeXTarget = spot.x; f.homeZTarget = spot.z; f.baseYTarget = targetBaseY;
     f.transitionTime = 0;
@@ -4206,11 +4210,11 @@ function spawnTurtleHome(tu){
   tu.bottom = spot.bottom; tu.top = spot.top;
   const depth = spot.top - spot.bottom + 1;
   const targetBaseY = spot.bottom + depth/2;
-  // A slower, more leisurely relocation cruise speed than a fish's — see relocateTransitionTime.
-  tu.transitionTime = relocateTransitionTime(tu.homeX, tu.homeZ, spot.x, spot.z, 6, 2);
+  // A slower, more leisurely relocation window than a fish's — see relocateTransitionTime.
+  tu.transitionTime = relocateTransitionTime(tu.homeX, tu.homeZ, spot.x, spot.z, TURTLE_RADIUS, 2);
   tu.homeXTarget = spot.x; tu.homeZTarget = spot.z; tu.baseYTarget = targetBaseY;
   tu.transitionElapsed = 0;
-  if(tu.homeX===0 && tu.homeZ===0){
+  if((tu.homeX===0 && tu.homeZ===0) || tu.transitionTime===0){
     tu.homeX = spot.x; tu.homeZ = spot.z; tu.baseY = targetBaseY;
     tu.homeXTarget = spot.x; tu.homeZTarget = spot.z; tu.baseYTarget = targetBaseY;
     tu.transitionTime = 0;
