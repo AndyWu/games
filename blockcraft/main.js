@@ -139,6 +139,7 @@ const MEAT_YIELD = { dog:1, sheep:1, lion:2, cow:2, giraffe:3, elephant:4,
   robin:1, sparrow:1, blue_jay:1, cardinal:1, crow:2, bluebird:1, finch:1, swallow:1, dove:1, woodpecker:1, owl:2, hawk:2, eagle:2, parrot:1, toucan:1, flamingo:2, hummingbird:1, kingfisher:1, heron:2, pelican:2, seagull:1, magpie:1, raven:2, wren:1, chickadee:1, oriole:1, warbler:1, swan:2, duck:1, goose:2,
   goldfish:1, bass:1, salmon:1, tuna:2, clownfish:1, catfish:1, shark:3, whaleshark:5,
   worm:1, gopher:2, bigeagle:3,
+  greenturtle:1, hawksbill:1, loggerhead:2,
 };
 // Rough horizontal collision radius per species, used for entity-vs-entity collision below.
 const ANIMAL_RADIUS = {
@@ -830,6 +831,29 @@ function loadInventory(){
     for(const k in obj) inventory[k] = obj[k];
   }catch(e){ inventory[CRAFTING_TABLE] = 1; }
 }
+// A player who leaves while alive comes back at the same spot next time, instead of a random spawn
+// point — position changes every frame, so unlike the debounced saves above this is saved on a plain
+// periodic timer (see the setInterval near the bottom of the file) plus once more right as the tab
+// actually closes (beforeunload/pagehide), rather than debounced-on-change, which would just keep
+// getting reset by continuous movement and might never actually fire. Skipped entirely while dead —
+// see spawnPlayerAtStart — so the position restored next load is always one they were alive at.
+const POS_KEY = 'blockcraft_last_pos_v1';
+const POSITION_SAVE_INTERVAL_MS = 5000; // how often the plain periodic timer below re-saves it
+function savePosition(){
+  if(isDead) return;
+  try{
+    localStorage.setItem(POS_KEY, JSON.stringify({ x: player.pos.x, y: player.pos.y, z: player.pos.z }));
+  }catch(e){}
+}
+function loadPosition(){
+  try{
+    const raw = localStorage.getItem(POS_KEY);
+    if(!raw) return null;
+    const p = JSON.parse(raw);
+    if(typeof p.x!=='number' || typeof p.y!=='number' || typeof p.z!=='number') return null;
+    return p;
+  }catch(e){ return null; }
+}
 
 // ---------- Chunked mesh building ----------
 let scene, camera, renderer, hemiLight, sunLight, heldTorchLight;
@@ -1144,7 +1168,7 @@ const player = {
   pos: new THREE.Vector3(0,0,0),
   vel: new THREE.Vector3(0,0,0),
   yaw: 0, pitch: 0, onGround: false, crawling: false, inWater: false,
-  canDoubleJump: false, spaceWasDown: false, crawlMode: false,
+  canDoubleJump: false, spaceWasDown: false, crawlMode: false, ridingEagle: null,
   width: 0.6, height: PLAYER_HEIGHT, eye: PLAYER_EYE,
 };
 // 10 fixed spawn points spread across the map, as fractions of WORLD_SIZE so they scale with it.
@@ -1165,6 +1189,25 @@ function spawnPlayer(){
   player.pos.set(x+0.5, h+2, z+0.5);
   player.vel.set(0,0,0);
   player.fallFrom = player.pos.y;
+}
+// Only used once, at page load: restores wherever this browser's player last was (see savePosition)
+// if it looks like sane, in-bounds data, falling back to a normal random spawnPlayer() otherwise —
+// no saved position yet, corrupted localStorage, or the player last left while dead (savePosition
+// skips writing in that case, so death always still means a fresh random spawn). The world can
+// change while nobody's there to see it (water flowing in, leaves regrowing), so if the saved spot
+// is now embedded in something solid, nudge upward a little rather than leaving the player stuck.
+function spawnPlayerAtStart(){
+  const p = loadPosition();
+  const inBounds = p && p.x>=0 && p.x<=WORLD_SIZE && p.z>=0 && p.z<=WORLD_SIZE && p.y>0 && p.y<WORLD_HEIGHT;
+  if(!inBounds){ spawnPlayer(); return; }
+  player.pos.set(p.x, p.y, p.z);
+  player.vel.set(0,0,0);
+  player.fallFrom = player.pos.y;
+  let tries = 0;
+  while(collidesBox(player.pos.x, player.pos.y, player.pos.z) && tries<30){
+    player.pos.y += 1;
+    tries++;
+  }
 }
 
 // ---------- Blocky character model (the player's own body, and other connected players) ----------
@@ -1725,6 +1768,18 @@ function damageBigEagle(eagle, dmg){
     if(idx>=0) bigEagles.splice(idx, 1);
   }
 }
+function damageTurtle(turtle, dmg){
+  turtle.hp = Math.max(0, turtle.hp - dmg);
+  if(turtle.hp<=0){
+    SFX.animalDeath();
+    invAdd(MEAT, MEAT_YIELD[turtle.species.id] || 1);
+    saveInventory();
+    updateHotbarUI();
+    scene.remove(turtle.mesh);
+    const idx = turtles.indexOf(turtle);
+    if(idx>=0) turtles.splice(idx, 1);
+  }
+}
 function applyRemoteMobHp(id, hp){
   const a = animals.find(x=>x.id===id);
   if(!a || hp==null || hp===a.hp) return;
@@ -2114,6 +2169,13 @@ function findAttackTarget(){
     const dot = (dx/dist)*dir.x + (dy/dist)*dir.y + (dz/dist)*dir.z;
     if(dot>ATTACK_ANGLE_COS){ best = {type:'bigeagle', ref:eagle}; bestDist = dist; }
   });
+  turtles.forEach(turtle=>{
+    const dx=turtle.mesh.position.x-origin.x, dy=(turtle.mesh.position.y)-origin.y, dz=turtle.mesh.position.z-origin.z;
+    const dist = Math.hypot(dx,dy,dz);
+    if(dist>ATTACK_RANGE || dist>=bestDist) return;
+    const dot = (dx/dist)*dir.x + (dy/dist)*dir.y + (dz/dist)*dir.z;
+    if(dot>ATTACK_ANGLE_COS){ best = {type:'turtle', ref:turtle}; bestDist = dist; }
+  });
   remotePlayers.forEach((e,id)=>{
     const dx=e.mesh.position.x-origin.x, dy=(e.mesh.position.y+1.0)-origin.y, dz=e.mesh.position.z-origin.z;
     const dist = Math.hypot(dx,dy,dz);
@@ -2144,6 +2206,7 @@ function tryAttack(){
     else if(target.type==='fish') damageBirdOrFish(target.ref, PLAYER_ATTACK_DMG, 'fish');
     else if(target.type==='gopher') damageGopher(target.ref, PLAYER_ATTACK_DMG);
     else if(target.type==='bigeagle') damageBigEagle(target.ref, PLAYER_ATTACK_DMG);
+    else if(target.type==='turtle') damageTurtle(target.ref, PLAYER_ATTACK_DMG);
     else damageRemotePlayer(target.id, target.ref, PLAYER_ATTACK_DMG);
   }
   return true;
@@ -3752,6 +3815,14 @@ function updateBirds(dt){
 // reasoning as birds eating worms below WORM_MIN_POPULATION_FOR_PREDATION). They're themselves
 // attackable and drop Meat like every other creature here.
 const BIG_EAGLE_COUNT = 2;
+// Land on a Giant Eagle's back (fall onto it from above, same as landing on any big animal) and you
+// ride it: it stops circling and instead flies a slow, broad tour of random points across the whole
+// map, like a sightseeing bus, carrying you along — see the riding branch at the top of updatePlayer
+// and the beingRidden branch in updateBigEagles. Press Space to get off wherever you currently are;
+// the eagle then picks a fresh home nearby and goes back to its normal circling.
+const EAGLE_MOUNT_RADIUS = 1.1;   // how close (horizontally) counts as "landed on its back"
+const EAGLE_MOUNT_HEIGHT = 0.75;  // how tall its body reads for mounting/sitting purposes
+const EAGLE_TOUR_SPEED = 9;       // blocks/sec while touring with a rider
 // Classic bald-eagle coloring: near-black body/wings, a white head (birdMaterials' optional `head`
 // override — every regular bird species omits it and just reuses its body color), and the golden
 // beak every bird already has for free (birdBeakMat, shared globally).
@@ -3791,6 +3862,7 @@ function ensureBigEagles(){
       flapPhase: Math.random()*Math.PI*2, flapSpeed: 4+Math.random()*2, // slower, more majestic than small birds
       // Staggered so the two eagles don't both hunt the instant the world loads.
       lastHuntAt: Date.now() - Math.random()*BIG_EAGLE_HUNT_INTERVAL_MS,
+      beingRidden: false, tourTargetX:0, tourTargetY:0, tourTargetZ:0, tourTimer:0,
     };
     spawnBigEagleHome(e);
     bigEagles.push(e);
@@ -3801,6 +3873,33 @@ function updateBigEagles(dt){
   const t = performance.now()/1000;
   const now = Date.now();
   for(const e of bigEagles){
+    if(e.beingRidden){
+      // Touring: fly a slow, broad, meandering route — a fresh random point anywhere on the map every
+      // time it gets close to (or takes too long reaching) the last one — instead of circling home.
+      e.tourTimer -= dt;
+      const dtx = e.tourTargetX - e.mesh.position.x, dtz = e.tourTargetZ - e.mesh.position.z;
+      const tourDist = Math.hypot(dtx, dtz);
+      if(e.tourTimer<=0 || tourDist<3){
+        e.tourTargetX = 4 + Math.random()*(WORLD_SIZE-8);
+        e.tourTargetZ = 4 + Math.random()*(WORLD_SIZE-8);
+        e.tourTargetY = heightAt(Math.floor(e.tourTargetX), Math.floor(e.tourTargetZ)) + 12 + Math.random()*10;
+        e.tourTimer = 20 + Math.random()*15; // a generous safety timeout, in case it can't quite reach
+      }
+      if(tourDist>0.01){
+        const step = Math.min(EAGLE_TOUR_SPEED*dt, tourDist);
+        e.mesh.position.x += dtx/tourDist*step;
+        e.mesh.position.z += dtz/tourDist*step;
+        e.mesh.rotation.y = Math.atan2(-dtx/tourDist, -dtz/tourDist);
+      }
+      const dyToTarget = e.tourTargetY - e.mesh.position.y;
+      e.mesh.position.y += Math.sign(dyToTarget) * Math.min(Math.abs(dyToTarget), EAGLE_TOUR_SPEED*dt);
+
+      e.flapPhase += dt*e.flapSpeed;
+      const flap = Math.sin(e.flapPhase)*0.7;
+      for(const wingPivot of e.mesh.userData.wings) wingPivot.rotation.z = wingPivot.userData.side*flap;
+      continue; // no circling, no hunting, while it's busy giving a tour
+    }
+
     if(e.transitionTime > 0){
       e.transitionElapsed += dt;
       const alpha = Math.min(1, e.transitionElapsed / e.transitionTime);
@@ -4003,6 +4102,142 @@ function updateFish(dt){
 
     f.tailPhase += dt*f.tailSpeed;
     f.mesh.userData.tail.rotation.y = Math.sin(f.tailPhase)*0.6; // side-to-side wiggle, not a bird's up/down flap
+  }
+}
+
+// ---------- Turtles: slow-swimming water dwellers ----------
+// Same home-point-in-a-water-column approach as fish (reuses findFishSpot directly — it isn't
+// actually fish-specific, just "a nearby water column at least this deep"), but noticeably slower and
+// lower-amplitude, matching a turtle's leisurely paddle instead of a fish's darting swim, and a real
+// shell-plus-flippers body instead of a torpedo one. Four flippers each paddle on their own pivot.
+const TURTLE_SPECIES = [
+  { id:'greenturtle', name:'Green Sea Turtle', shell:0x3a5a2a, skin:0x5a8a4a, size:1.0 },
+  { id:'hawksbill',   name:'Hawksbill Turtle',  shell:0x8a5a2a, skin:0xc9a25a, size:0.9 },
+  { id:'loggerhead',  name:'Loggerhead Turtle', shell:0x7a4a2a, skin:0xa87850, size:1.15 },
+];
+const TURTLE_COUNT = TURTLE_SPECIES.length * 3;
+const TURTLE_RADIUS = 24;
+const turtles = [];
+const turtleMatCache = new Map();
+const turtleEyeMat = new THREE.MeshLambertMaterial({ color: 0x141414 });
+function turtleMaterials(species){
+  let m = turtleMatCache.get(species.id);
+  if(!m){
+    m = { shell: new THREE.MeshLambertMaterial({ color: species.shell }), skin: new THREE.MeshLambertMaterial({ color: species.skin }) };
+    turtleMatCache.set(species.id, m);
+  }
+  return m;
+}
+function buildTurtleMesh(species){
+  const { shell: shellMat, skin: skinMat } = turtleMaterials(species);
+  const g = new THREE.Group();
+
+  const shell = animalBox(0.32, 0.14, 0.36, shellMat);
+  shell.position.set(0, 0.06, 0);
+  g.add(shell);
+
+  const head = animalBox(0.1, 0.09, 0.12, skinMat);
+  head.position.set(0, 0.03, -0.22);
+  g.add(head);
+
+  for(const side of [1,-1]){
+    const eye = animalBox(0.015, 0.015, 0.015, turtleEyeMat);
+    eye.position.set(side*0.035, 0.05, -0.27);
+    g.add(eye);
+  }
+
+  // Four flippers, each on its own hinge so they can paddle independently of the shell — front pair
+  // sweeps opposite the back pair, the way a real sea turtle actually strokes.
+  const flippers = [];
+  for(const side of [1,-1]){
+    for(const front of [1,-1]){
+      const pivot = new THREE.Group();
+      pivot.position.set(side*0.17, 0.03, front*-0.13);
+      const flipper = animalBox(0.13, 0.02, 0.1, skinMat);
+      flipper.geometry.translate(side*0.065, 0, 0);
+      pivot.add(flipper);
+      pivot.userData.side = side; pivot.userData.front = front;
+      g.add(pivot);
+      flippers.push(pivot);
+    }
+  }
+  g.userData.flippers = flippers;
+
+  const tail = animalBox(0.04, 0.03, 0.08, skinMat);
+  tail.position.set(0, 0.03, 0.19);
+  g.add(tail);
+
+  g.scale.setScalar(species.size);
+  g.traverse(o => { if(o.isMesh) o.castShadow = true; });
+  return g;
+}
+function spawnTurtleHome(tu){
+  const spot = findFishSpot(tu.species.minDepth);
+  if(!spot){ tu.hasHome = false; tu.mesh.visible = false; return; }
+  tu.hasHome = true; tu.mesh.visible = true;
+  tu.bottom = spot.bottom; tu.top = spot.top;
+  const depth = spot.top - spot.bottom + 1;
+  const targetBaseY = spot.bottom + depth/2;
+  tu.homeXTarget = spot.x; tu.homeZTarget = spot.z; tu.baseYTarget = targetBaseY;
+  tu.transitionTime = 2; tu.transitionElapsed = 0; // a slower, more leisurely relocation than a fish's
+  if(tu.homeX===0 && tu.homeZ===0){
+    tu.homeX = spot.x; tu.homeZ = spot.z; tu.baseY = targetBaseY;
+    tu.homeXTarget = spot.x; tu.homeZTarget = spot.z; tu.baseYTarget = targetBaseY;
+    tu.transitionTime = 0;
+  }
+}
+function ensureTurtles(){
+  if(turtles.length) return;
+  const speciesList = [];
+  for(const species of TURTLE_SPECIES) for(let i=0;i<(species.count||3);i++) speciesList.push(species);
+  for(const species of speciesList){
+    const mesh = buildTurtleMesh(species);
+    scene.add(mesh);
+    const hp = species.hp||1;
+    const tu = {
+      mesh, species, homeX:0, homeZ:0, bottom:1, top:1, baseY:1, hasHome:false,
+      hp, maxHp: hp,
+      freqX: 0.07+Math.random()*0.1, freqZ: 0.07+Math.random()*0.1, // noticeably slower than fish
+      ampXZ: 1.0+Math.random()*1.2, phase: Math.random()*Math.PI*2,
+      vertPeriod: 10+Math.random()*12, vertPhase: Math.random()*Math.PI*2,
+      paddlePhase: Math.random()*Math.PI*2, paddleSpeed: 2+Math.random()*1.5,
+    };
+    spawnTurtleHome(tu);
+    turtles.push(tu);
+  }
+}
+function updateTurtles(dt){
+  ensureTurtles();
+  const t = performance.now()/1000;
+  for(const tu of turtles){
+    if(!tu.hasHome){ spawnTurtleHome(tu); if(!tu.hasHome) continue; }
+
+    if(tu.transitionTime > 0){
+      tu.transitionElapsed += dt;
+      const alpha = Math.min(1, tu.transitionElapsed / tu.transitionTime);
+      tu.homeX += (tu.homeXTarget - tu.homeX) * alpha;
+      tu.homeZ += (tu.homeZTarget - tu.homeZ) * alpha;
+      tu.baseY += (tu.baseYTarget - tu.baseY) * alpha;
+    }
+
+    const dx = tu.homeXTarget-player.pos.x, dz = tu.homeZTarget-player.pos.z;
+    if(dx*dx+dz*dz > TURTLE_RADIUS*TURTLE_RADIUS){ spawnTurtleHome(tu); if(!tu.hasHome) continue; }
+    const ax = t*tu.freqX+tu.phase, az = t*tu.freqZ+tu.phase*1.3;
+    let x = tu.homeX + Math.sin(ax)*tu.ampXZ;
+    let z = tu.homeZ + Math.cos(az)*tu.ampXZ;
+    const vertRange = Math.max(0.2, (tu.top-tu.bottom)/2 - 0.3);
+    let y = tu.baseY + Math.sin(t/tu.vertPeriod*Math.PI*2+tu.vertPhase)*vertRange;
+    if(getBlock(Math.floor(x), Math.floor(y), Math.floor(z)) !== WATER){ x=tu.homeX; z=tu.homeZ; y=tu.baseY; }
+    tu.mesh.position.set(x,y,z);
+    const vx = Math.cos(ax)*tu.freqX*tu.ampXZ, vz = -Math.sin(az)*tu.freqZ*tu.ampXZ;
+    if(vx*vx+vz*vz > 0.0001) tu.mesh.rotation.y = Math.atan2(-vx,-vz);
+
+    tu.paddlePhase += dt*tu.paddleSpeed;
+    const stroke = Math.sin(tu.paddlePhase)*0.35;
+    for(const flipperPivot of tu.mesh.userData.flippers){
+      // Front and back flippers on the same side stroke in opposite phase, like a real swim stroke.
+      flipperPivot.rotation.x = flipperPivot.userData.front*stroke;
+    }
   }
 }
 
@@ -4704,6 +4939,36 @@ function collidesBox(px,py,pz){
         if(blockSolid(x,y,z)) return true;
   return false;
 }
+// Animals only ever blocked HORIZONTAL player movement (entityBlockedByOthers, a radius push-back) —
+// there was no vertical collision against them at all, so jumping over one (or just falling near one)
+// let the player's Y movement clip straight through its body with nothing to land on, instead of
+// landing on its back like any other solid obstacle. Same per-animal AABB (ANIMAL_RADIUS horizontally,
+// ANIMAL_REAL_HEIGHT vertically) already used by animalOverlapsCell, checked against the player's own
+// hitbox the same way collidesBox checks it against solid blocks.
+function collidesAnimal(px,py,pz){
+  const w = player.width/2;
+  for(const a of animals){
+    const r = ANIMAL_RADIUS[a.type]||0.4;
+    const h = ANIMAL_REAL_HEIGHT[a.type]||0.8;
+    if(px+w>a.x-r && px-w<a.x+r && pz+w>a.z-r && pz-w<a.z+r && py<a.y+h && py+player.height>a.y) return true;
+  }
+  return false;
+}
+// Same idea as collidesAnimal, but for a Giant Eagle specifically — falling onto one mounts it (see
+// the Y-collision check in updatePlayer) instead of just stopping the fall.
+function findMountableEagle(px,py,pz){
+  const w = player.width/2;
+  const now = performance.now();
+  for(const e of bigEagles){
+    if(e.beingRidden) continue;
+    if(e.remountBlockedUntil && now < e.remountBlockedUntil) continue;
+    const ex = e.mesh.position.x, ey = e.mesh.position.y, ez = e.mesh.position.z;
+    if(px+w>ex-EAGLE_MOUNT_RADIUS && px-w<ex+EAGLE_MOUNT_RADIUS &&
+       pz+w>ez-EAGLE_MOUNT_RADIUS && pz-w<ez+EAGLE_MOUNT_RADIUS &&
+       py<ey+EAGLE_MOUNT_HEIGHT && py+player.height>ey) return e;
+  }
+  return null;
+}
 
 // ---------- Entity-vs-entity collision (players & animals can't walk through each other) ----------
 // excludeAnimal: pass the animal doing the checking (so it also gets checked against the local
@@ -4791,6 +5056,40 @@ function isInWater(){
   return getBlock(Math.floor(player.pos.x), Math.floor(player.pos.y+player.height*0.5), Math.floor(player.pos.z))===WATER;
 }
 function updatePlayer(dt){
+  // Riding a Giant Eagle overrides everything else — no gravity, no WASD, no jumping, just along for
+  // the tour (see the beingRidden branch in updateBigEagles). Mouse-look still works normally, since
+  // that's driven by its own separate mousemove listener, not anything in here. Space gets off.
+  if(player.ridingEagle){
+    const e = player.ridingEagle;
+    const stillExists = bigEagles.includes(e);
+    const spaceDown = !!keys['Space'];
+    const dismountPressed = spaceDown && !player.spaceWasDown;
+    player.spaceWasDown = spaceDown;
+    if(!stillExists || dismountPressed){
+      // Dismount (or the eagle was killed mid-ride) — give it a fresh nearby home and let it resume
+      // circling; normal physics (gravity included) picks back up for the player starting next frame.
+      if(stillExists){
+        e.beingRidden = false;
+        // Dismounting doesn't move the player away from the eagle's back — without this, the very
+        // next physics frame's gravity tick would find them still sitting exactly in its mount
+        // hitbox and immediately remount them, over and over, forever (vel.y resets to 0 on every
+        // mount, so they'd never actually fall). A brief cooldown on just this eagle gives the
+        // player time to actually fall clear before it's mountable again.
+        e.remountBlockedUntil = performance.now() + 1000;
+        spawnBigEagleHome(e);
+      }
+      player.ridingEagle = null;
+      player.vel.set(0,0,0);
+      player.onGround = false;
+      return;
+    }
+    player.pos.set(e.mesh.position.x, e.mesh.position.y + EAGLE_MOUNT_HEIGHT, e.mesh.position.z);
+    player.vel.set(0,0,0);
+    player.onGround = false;
+    player.fallFrom = player.pos.y; // no fall damage accrued while riding, however high it flies
+    return;
+  }
+
   const fx = -Math.sin(player.yaw), fz = -Math.cos(player.yaw);
   const rx =  Math.cos(player.yaw), rz = -Math.sin(player.yaw);
 
@@ -4860,7 +5159,13 @@ function updatePlayer(dt){
   const fromX = player.pos.x, fromZ = player.pos.z;
   if(!collidesBox(player.pos.x+dx, player.pos.y, player.pos.z) && !entityBlockedByOthers(player.pos.x+dx, player.pos.z, pr, undefined, fromX, fromZ)) player.pos.x += dx;
   if(!collidesBox(player.pos.x, player.pos.y, player.pos.z+dz) && !entityBlockedByOthers(player.pos.x, player.pos.z+dz, pr, undefined, fromX, fromZ)) player.pos.z += dz;
-  if(!collidesBox(player.pos.x, player.pos.y+dy, player.pos.z)){
+  const mountEagle = dy<0 ? findMountableEagle(player.pos.x, player.pos.y+dy, player.pos.z) : null;
+  if(mountEagle){
+    player.ridingEagle = mountEagle;
+    mountEagle.beingRidden = true;
+    player.vel.set(0,0,0);
+    player.onGround = false;
+  } else if(!collidesBox(player.pos.x, player.pos.y+dy, player.pos.z) && !collidesAnimal(player.pos.x, player.pos.y+dy, player.pos.z)){
     player.pos.y += dy;
     player.onGround = false;
   } else {
@@ -5448,8 +5753,17 @@ function makeItemTile(id){
   label.className = 'itemLabel';
   label.textContent = BLOCK_NAME[id];
   tile.appendChild(label);
-  tile.title = BLOCK_NAME[id] + (count===Infinity ? ' — unlimited' : (count>0 ? ` — you have ${count}` : ' — you have none yet'));
+  const countText = count===Infinity ? ' — unlimited' : (count>0 ? ` — you have ${count}` : ' — you have none yet');
+  // Meat is food, not a block/tool you'd ever want to select into a hotbar slot — clicking it here
+  // eats it on the spot (same tryEatMeat used when you right-click it from the hotbar), so resolving
+  // hunger doesn't require first freeing up a slot and switching to it.
+  tile.title = id===MEAT ? BLOCK_NAME[id] + countText + ' — click to eat' : BLOCK_NAME[id] + countText;
   tile.addEventListener('click', ()=>{
+    if(id===MEAT){
+      tryEatMeat();
+      renderItemsGrid();
+      return;
+    }
     HOTBAR[selectedSlot] = id;
     saveHotbar();
     updateHotbarUI();
@@ -5606,7 +5920,7 @@ function init(){
   loadInventory();
   loadHotbar();
   rebuildAllChunks();
-  spawnPlayer();
+  spawnPlayerAtStart();
   spawnAnimals();
   updateHotbarUI();
   updateHeldItemColor();
@@ -5661,6 +5975,7 @@ function animate(now){
   updateGhost(dt);
   updateBirds(dt);
   updateFish(dt);
+  updateTurtles(dt);
   updateBigEagles(dt);
   updateGophers(dt);
   heldTorchLight.visible = HOTBAR[selectedSlot]===TORCH;
@@ -5744,6 +6059,13 @@ const updateReloadBtn = document.getElementById('updateReloadBtn');
 if(updateReloadBtn) updateReloadBtn.addEventListener('click', ()=> location.reload());
 checkForUpdate();
 setInterval(checkForUpdate, UPDATE_CHECK_INTERVAL_MS);
+
+// Keeps "leave the game alive, come back at the same spot" fresh even if the tab is killed outright
+// (mobile task-switching, a crash) rather than closed cleanly — the periodic timer is the real
+// safety net; beforeunload/pagehide below just make the very last moment before a clean close exact.
+setInterval(savePosition, POSITION_SAVE_INTERVAL_MS);
+window.addEventListener('beforeunload', savePosition);
+window.addEventListener('pagehide', savePosition);
 
 init();
 })();
