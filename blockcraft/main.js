@@ -3398,6 +3398,12 @@ function buildButterflyMesh(seed){
   for(const side of [1,-1]){
     const pivot = new THREE.Group();
     const wingGeo = new THREE.PlaneGeometry(WING_W, WING_H);
+    // PlaneGeometry starts facing the camera (its normal along Z, lying flat in the XY plane) — flapping
+    // that around Z (the body's spine axis) would just spin it in place like a pinwheel, not open/close
+    // it. Rotate it flat into the XZ plane first (matching the bird wings' box orientation) so the same
+    // rotation.z flap genuinely swings it between spread-open (near horizontal) and folded-up (near
+    // vertical), instead of just spinning the flat rectangle toward and away from the viewer.
+    wingGeo.rotateX(Math.PI/2);
     wingGeo.translate(side*WING_W/2, 0, 0); // inner edge at the pivot (the body's spine), not centered
     const wingMesh = new THREE.Mesh(wingGeo, mat);
     pivot.add(wingMesh);
@@ -3613,6 +3619,20 @@ function updateGhost(dt){
   g.light.intensity = night*0.6;
 }
 
+// Shared by every ambient creature below (birds, fish, turtles, Giant Eagles) that recycles its "home"
+// point to a fresh spot near the player once the old one falls too far away, then glides there smoothly
+// over a fixed window rather than teleporting. A fixed window works fine for an ordinary recycle (a
+// short hop at the edge of its radius), but the player can now cover real distance fast — sprinting,
+// swimming, or riding a Giant Eagle on a long tour — so a home that's fallen far behind can get recycled
+// to a spot near the player's new, much more distant position, and cramming that whole gap into the same
+// short fixed window made it look like the creature was suddenly dashing clear across the map. Scaling
+// the transition time by the actual distance (at a believable cruising speed, floored so a short recycle
+// still gets its usual quick animation) keeps every relocation at a consistent, natural pace no matter
+// how far the new spot ends up being.
+function relocateTransitionTime(fromX, fromZ, toX, toZ, cruiseSpeed, minTime){
+  return Math.max(minTime, Math.hypot(toX-fromX, toZ-fromZ) / cruiseSpeed);
+}
+
 // ---------- Birds: 30 flyable species, ambient wildlife that circles nearby and occasionally tweets ----------
 // Modeled on the fireflies' "home point recycled near the player + closed-form sinusoidal drift"
 // approach rather than the ground animals' wander/aggro state machine — birds fly through open 3D
@@ -3727,9 +3747,10 @@ function spawnBirdHome(b){
   const x = player.pos.x + Math.cos(ang)*r;
   const z = player.pos.z + Math.sin(ang)*r;
   const targetBaseY = heightAt(Math.floor(x), Math.floor(z)) + 6 + Math.random()*8; // above the canopy line
-  // Smoothly transition to a new home over 1.5 seconds instead of teleporting instantly
+  // Smoothly transition to a new home instead of teleporting instantly — see relocateTransitionTime.
+  b.transitionTime = relocateTransitionTime(b.homeX, b.homeZ, x, z, 20, 1.5);
   b.homeXTarget = x; b.homeZTarget = z; b.baseYTarget = targetBaseY;
-  b.transitionTime = 1.5; b.transitionElapsed = 0;
+  b.transitionElapsed = 0;
   // Initialize on first spawn
   if(b.homeX===0 && b.homeZ===0){
     b.homeX = x; b.homeZ = z; b.baseY = targetBaseY;
@@ -3842,8 +3863,9 @@ function spawnBigEagleHome(e){
   const x = player.pos.x + Math.cos(ang)*r;
   const z = player.pos.z + Math.sin(ang)*r;
   const targetBaseY = heightAt(Math.floor(x), Math.floor(z)) + 10 + Math.random()*10; // soars higher than regular birds
+  e.transitionTime = relocateTransitionTime(e.homeX, e.homeZ, x, z, EAGLE_TOUR_SPEED, 2);
   e.homeXTarget = x; e.homeZTarget = z; e.baseYTarget = targetBaseY;
-  e.transitionTime = 2; e.transitionElapsed = 0;
+  e.transitionElapsed = 0;
   if(e.homeX===0 && e.homeZ===0){
     e.homeX = x; e.homeZ = z; e.baseY = targetBaseY;
     e.homeXTarget = x; e.homeZTarget = z; e.baseYTarget = targetBaseY;
@@ -4046,9 +4068,10 @@ function spawnFishHome(f){
   f.bottom = spot.bottom; f.top = spot.top;
   const depth = spot.top - spot.bottom + 1;
   const targetBaseY = spot.bottom + depth/2;
-  // Smoothly transition to a new home over 1.5 seconds instead of teleporting instantly
+  // Smoothly transition to a new home instead of teleporting instantly — see relocateTransitionTime.
+  f.transitionTime = relocateTransitionTime(f.homeX, f.homeZ, spot.x, spot.z, 14, 1.5);
   f.homeXTarget = spot.x; f.homeZTarget = spot.z; f.baseYTarget = targetBaseY;
-  f.transitionTime = 1.5; f.transitionElapsed = 0;
+  f.transitionElapsed = 0;
   // Initialize on first spawn
   if(f.homeX===0 && f.homeZ===0){
     f.homeX = spot.x; f.homeZ = spot.z; f.baseY = targetBaseY;
@@ -4183,8 +4206,10 @@ function spawnTurtleHome(tu){
   tu.bottom = spot.bottom; tu.top = spot.top;
   const depth = spot.top - spot.bottom + 1;
   const targetBaseY = spot.bottom + depth/2;
+  // A slower, more leisurely relocation cruise speed than a fish's — see relocateTransitionTime.
+  tu.transitionTime = relocateTransitionTime(tu.homeX, tu.homeZ, spot.x, spot.z, 6, 2);
   tu.homeXTarget = spot.x; tu.homeZTarget = spot.z; tu.baseYTarget = targetBaseY;
-  tu.transitionTime = 2; tu.transitionElapsed = 0; // a slower, more leisurely relocation than a fish's
+  tu.transitionElapsed = 0;
   if(tu.homeX===0 && tu.homeZ===0){
     tu.homeX = spot.x; tu.homeZ = spot.z; tu.baseY = targetBaseY;
     tu.homeXTarget = spot.x; tu.homeZTarget = spot.z; tu.baseYTarget = targetBaseY;
