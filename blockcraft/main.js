@@ -2302,7 +2302,13 @@ function updateTorchLight(x,y,z,val){
   const key = x+','+y+','+z;
   if(val===TORCH){
     if(!torchLights.has(key)){
-      const light = new THREE.PointLight(0xffb060, 1.1, 8, 2);
+      // Indoor faces get a fair amount of darkening baked straight into their vertex colors (see
+      // INDOOR_DARK_FACTOR) — since MeshLambertMaterial multiplies a light's contribution by that
+      // per-vertex color, a light weak enough to look reasonable in the open (intensity 1.1, decay 2,
+      // the realistic inverse-square falloff) ends up essentially invisible against a torch-lit indoor
+      // wall. A lower decay (softer falloff) lets the glow actually reach and fill a small room instead
+      // of dying within a block or two of the torch.
+      const light = new THREE.PointLight(0xffb060, 6, 8, 1.6);
       light.position.set(x+0.5, y+0.7, z+0.5);
       scene.add(light);
       torchLights.set(key, light);
@@ -5922,7 +5928,8 @@ function init(){
 
   // Lights up around you while a Torch is your held item, same warm glow as a placed one — off
   // otherwise. A child of the camera so it always tracks wherever you're looking/standing for free.
-  heldTorchLight = new THREE.PointLight(0xffb060, 1.1, 8, 2);
+  // See the placed-torch light (updateTorchLight) for why the intensity/decay are tuned this high.
+  heldTorchLight = new THREE.PointLight(0xffb060, 6, 8, 1.6);
   heldTorchLight.visible = false;
   camera.add(heldTorchLight);
   scene.add(camera);
