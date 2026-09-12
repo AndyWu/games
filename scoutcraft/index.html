@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ScoutCraft — earn your merit badges</title>
+<!-- The ?v= query string isn't just cosmetic: Chrome's favicon cache is keyed by this exact URL and
+     can stick to a stale/missing result (e.g. from before the file existed) even after a hard
+     reload. Bump the version if the icon ever needs to change and still isn't picking up. -->
+<link rel="icon" type="image/png" sizes="512x512" href="assets/icon-512.png?v=1">
+<link rel="apple-touch-icon" href="assets/icon-512.png?v=1">
+<style>
+  html,body{margin:0;padding:0;overflow:hidden;height:100%;background:#8fd0ee;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;}
+  canvas{display:block;}
+  #crosshair{position:fixed;top:50%;left:50%;width:20px;height:20px;margin:-10px 0 0 -10px;pointer-events:none;z-index:10;}
+  #crosshair:before,#crosshair:after{content:"";position:absolute;background:rgba(255,255,255,0.85);box-shadow:0 0 2px rgba(0,0,0,0.6);}
+  #crosshair:before{left:9px;top:0;width:2px;height:20px;}
+  #crosshair:after{top:9px;left:0;width:20px;height:2px;}
+  #hotbar{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);display:flex;gap:6px;z-index:10;background:rgba(0,0,0,0.25);padding:6px;border-radius:8px;}
+  .slot{width:48px;height:48px;border:2px solid rgba(255,255,255,0.4);border-radius:6px;display:flex;align-items:center;justify-content:center;position:relative;background:rgba(255,255,255,0.08);}
+  .slot.active{border-color:#fff;box-shadow:0 0 8px rgba(255,255,255,0.8);}
+  .slot.empty .swatch{opacity:0.3;}
+  .slot .swatch{width:30px;height:30px;border-radius:3px;}
+  .slot .key{position:absolute;top:2px;left:4px;font-size:10px;color:#fff;text-shadow:0 0 3px #000;}
+  .slot .count{position:absolute;bottom:1px;right:3px;font-size:11px;font-weight:600;color:#fff;text-shadow:0 0 3px #000;}
+  .slot .icon{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:22px;line-height:1;pointer-events:none;text-shadow:0 1px 2px rgba(0,0,0,0.5);}
+  .slot.empty .icon{opacity:0.35;}
+  #overlay{position:fixed;inset:0;background:rgba(0,0,0,0.55);color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;z-index:20;cursor:pointer;}
+  #overlay h1{font-size:2.4em;margin:0 0 10px;}
+  #overlay p{max-width:520px;line-height:1.6;opacity:0.92;font-size:15px;}
+  #overlay .key{background:rgba(255,255,255,0.15);padding:2px 8px;border-radius:4px;}
+  #overlay .small{margin-top:18px;font-size:12px;opacity:0.65;}
+  #nameEntry{margin-top:14px;}
+  #nameInput{font-size:16px;padding:8px 14px;border-radius:6px;border:2px solid rgba(255,255,255,0.4);background:rgba(255,255,255,0.1);color:#fff;text-align:center;width:200px;outline:none;}
+  #nameInput::placeholder{color:rgba(255,255,255,0.55);}
+  #nameInput:focus{border-color:#fff;}
+  #hud{position:fixed;top:10px;left:10px;color:#fff;font-size:12px;text-shadow:0 0 3px #000;z-index:10;line-height:1.5;background:rgba(0,0,0,0.25);padding:6px 10px;border-radius:6px;pointer-events:none;max-width:calc(50vw - 110px);}
+  #minimap{position:fixed;top:48px;left:10px;z-index:10;background:rgba(0,0,0,0.35);border:2px solid rgba(255,255,255,0.35);border-radius:8px;padding:4px;pointer-events:none;}
+  #minimapCanvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges;}
+  #tempLabel.danger{color:#ff5a4a;font-weight:700;animation:tempPulse 1s ease-in-out infinite;}
+  @keyframes tempPulse{0%,100%{opacity:1;}50%{opacity:0.55;}}
+  #hearts{position:fixed;top:10px;left:50%;transform:translateX(-50%);display:flex;gap:2px;z-index:10;filter:drop-shadow(0 0 2px rgba(0,0,0,0.7));pointer-events:none;}
+  #hunger{position:fixed;top:34px;left:50%;transform:translateX(-50%);display:flex;gap:2px;z-index:10;font-size:16px;text-shadow:0 0 3px #000;pointer-events:none;}
+  #deathMessage{position:fixed;top:35%;left:50%;transform:translate(-50%,-50%);color:#e05a4a;font-size:2em;font-weight:700;text-shadow:0 0 8px rgba(0,0,0,0.8);z-index:15;pointer-events:none;}
+  #hurtOverlay{position:fixed;inset:0;z-index:14;pointer-events:none;opacity:0;background:radial-gradient(ellipse at center, rgba(180,0,0,0) 35%, rgba(180,0,0,0.55) 100%);}
+  #lightningFlash{position:fixed;inset:0;z-index:13;pointer-events:none;opacity:0;background:#fff;}
+  #hint{position:fixed;bottom:80px;left:50%;transform:translateX(-50%);color:#fff;font-size:12px;text-shadow:0 0 3px #000;z-index:10;opacity:0.85;white-space:nowrap;pointer-events:none;}
+  body.touch-device #hint{display:none;}
+  #updateBanner{position:fixed;top:36px;left:50%;transform:translateX(-50%);z-index:25;background:#3a2f0f;color:#ffe9a8;border:1px solid rgba(255,220,120,0.5);border-radius:8px;padding:8px 14px;font-size:13px;display:flex;align-items:center;gap:10px;box-shadow:0 4px 16px rgba(0,0,0,0.4);white-space:nowrap;}
+  #updateReloadBtn{background:#ffcc4d;color:#2b2100;border:none;border-radius:5px;padding:4px 10px;font-size:12px;font-weight:700;cursor:pointer;}
+  #updateReloadBtn:hover{background:#ffd966;}
+  #debugPanel{position:fixed;top:10px;right:10px;width:300px;max-height:calc(100vh - 20px);overflow-y:auto;background:rgba(10,14,10,0.85);color:#c8f7c5;font-family:'SF Mono',Menlo,Consolas,monospace;font-size:11px;line-height:1.55;padding:10px 12px;border-radius:8px;border:1px solid rgba(150,255,150,0.3);z-index:20;pointer-events:none;}
+  #debugPanel h3{margin:10px 0 3px;font-size:11px;color:#9dffb0;text-transform:uppercase;letter-spacing:0.05em;border-bottom:1px solid rgba(150,255,150,0.25);padding-bottom:3px;}
+  #debugPanel h3:first-child{margin-top:0;}
+  #debugPanel table{width:100%;border-collapse:collapse;}
+  #debugPanel td{padding:1px 0;}
+  #debugPanel td:last-child{text-align:right;color:#fff;}
+  #touchControls{position:fixed;inset:0;pointer-events:none;}
+  #touchLookZone{position:absolute;inset:0;z-index:9;pointer-events:auto;touch-action:none;}
+  #joystickBase{position:fixed;left:26px;bottom:26px;width:110px;height:110px;border-radius:50%;background:rgba(255,255,255,0.12);border:2px solid rgba(255,255,255,0.35);z-index:11;pointer-events:auto;touch-action:none;}
+  #joystickKnob{position:absolute;left:50%;top:50%;width:48px;height:48px;margin:-24px 0 0 -24px;border-radius:50%;background:rgba(255,255,255,0.55);border:2px solid rgba(255,255,255,0.8);}
+  .touchBtn{position:fixed;z-index:11;pointer-events:auto;touch-action:none;border-radius:50%;border:2px solid rgba(255,255,255,0.5);background:rgba(0,0,0,0.35);color:#fff;font-size:22px;display:flex;align-items:center;justify-content:center;-webkit-user-select:none;user-select:none;}
+  #btnAttack{right:20px;bottom:100px;width:74px;height:74px;}
+  #btnPlace{right:104px;bottom:100px;width:60px;height:60px;font-size:17px;}
+  #btnJump{right:20px;bottom:20px;width:60px;height:60px;font-size:13px;}
+  #btnCrawl{right:92px;bottom:24px;width:52px;height:52px;font-size:11px;}
+  #btnCrawl.active{background:rgba(255,255,255,0.4);}
+  #btn3p{right:16px;top:10px;width:44px;height:44px;font-size:16px;z-index:11;}
+  #btnTime{right:66px;top:10px;width:44px;height:44px;font-size:16px;z-index:11;}
+  #btnChat{right:16px;top:60px;width:44px;height:44px;font-size:18px;z-index:11;}
+  #chatLog{position:fixed;left:10px;bottom:130px;width:min(420px,calc(100vw - 20px));max-height:200px;overflow-y:auto;display:flex;flex-direction:column;gap:2px;z-index:12;pointer-events:none;}
+  .chatLine{background:rgba(0,0,0,0.45);color:#fff;font-size:13px;padding:3px 8px;border-radius:4px;text-shadow:0 0 3px #000;word-break:break-word;align-self:flex-start;max-width:100%;}
+  .chatLine b{color:#8fd0ee;}
+  #chatInputBar{position:fixed;left:10px;bottom:96px;width:min(420px,calc(100vw - 20px));z-index:26;}
+  #chatInput{width:100%;box-sizing:border-box;font-size:14px;padding:8px 10px;border-radius:6px;border:2px solid rgba(255,255,255,0.5);background:rgba(0,0,0,0.8);color:#fff;outline:none;}
+  #chatInput::placeholder{color:rgba(255,255,255,0.55);}
+  #craftHint{position:fixed;bottom:80px;left:50%;transform:translateX(-50%);color:#fff;font-size:13px;font-weight:600;text-shadow:0 0 4px #000;z-index:11;opacity:0;transition:opacity 0.15s;pointer-events:none;background:rgba(0,0,0,0.4);padding:6px 12px;border-radius:6px;}
+  #craftHint.show{opacity:1;}
+  #craftingModal{position:fixed;inset:0;z-index:30;background:rgba(0,0,0,0.55);display:flex;align-items:center;justify-content:center;}
+  #craftingPanel{background:#2b2320;color:#f2e9d8;width:min(560px,92vw);max-height:82vh;overflow:auto;border-radius:10px;border:2px solid #5a4632;box-shadow:0 10px 40px rgba(0,0,0,0.5);}
+  #craftingHeader{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid #5a4632;position:sticky;top:0;background:#2b2320;}
+  #craftingHeader h2{margin:0;font-size:1.2em;}
+  #craftingClose{background:none;border:none;color:#f2e9d8;font-size:1.1em;cursor:pointer;padding:4px 10px;border-radius:6px;}
+  #craftingClose:hover{background:rgba(255,255,255,0.12);}
+  #craftingInventory{display:flex;flex-wrap:wrap;gap:8px;padding:14px 18px;border-bottom:1px solid #5a4632;}
+  .invItem{display:flex;align-items:center;gap:6px;background:rgba(255,255,255,0.06);border-radius:6px;padding:4px 9px;font-size:12px;}
+  .invItem .sw{width:14px;height:14px;border-radius:3px;flex:none;display:inline-block;}
+  #craftingRecipes{padding:14px 18px;display:flex;flex-direction:column;gap:10px;}
+  .recipe{display:flex;align-items:center;gap:12px;background:rgba(255,255,255,0.05);border-radius:8px;padding:10px 12px;}
+  .recipe .sw{width:34px;height:34px;border-radius:6px;flex:none;}
+  .recipe .info{flex:1;font-size:13px;line-height:1.5;}
+  .recipe .info b{display:block;font-size:14px;}
+  .recipe .need{opacity:0.7;font-size:12px;}
+  .recipe .need.short{color:#e58a6f;}
+  .recipe button{background:#5b8a3a;border:none;color:#fff;padding:8px 14px;border-radius:6px;cursor:pointer;font-size:13px;flex:none;}
+  .recipe button:disabled{background:#555;cursor:not-allowed;opacity:0.5;}
+  #btnItems{position:fixed;bottom:104px;left:50%;transform:translateX(-50%);z-index:10;background:rgba(0,0,0,0.35);color:#fff;border:2px solid rgba(255,255,255,0.4);border-radius:8px;padding:5px 12px;font-size:12px;cursor:pointer;}
+  #btnItems:hover{background:rgba(0,0,0,0.55);}
+  #itemsModal{position:fixed;inset:0;z-index:31;background:rgba(0,0,0,0.55);display:flex;align-items:center;justify-content:center;}
+  #itemsPanel{background:#2b2320;color:#f2e9d8;width:min(520px,92vw);max-height:82vh;overflow:auto;border-radius:10px;border:2px solid #5a4632;box-shadow:0 10px 40px rgba(0,0,0,0.5);}
+  #itemsHeader{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid #5a4632;position:sticky;top:0;background:#2b2320;}
+  #itemsHeader h2{margin:0;font-size:1.2em;}
+  #itemsHeader p{margin:4px 0 0;font-size:12px;opacity:0.7;}
+  #itemsClose{background:none;border:none;color:#f2e9d8;font-size:1.1em;cursor:pointer;padding:4px 10px;border-radius:6px;}
+  #itemsClose:hover{background:rgba(255,255,255,0.12);}
+  #itemsGrid{padding:16px 18px;display:grid;grid-template-columns:repeat(auto-fill,minmax(78px,1fr));gap:10px;}
+  .itemTile{background:rgba(255,255,255,0.06);border:2px solid transparent;border-radius:8px;padding:8px 4px;display:flex;flex-direction:column;align-items:center;gap:6px;cursor:pointer;position:relative;}
+  .itemTile:hover{background:rgba(255,255,255,0.14);}
+  .itemTile.active{border-color:#fff;}
+  .itemTile.empty{opacity:0.4;}
+  .itemTile .swatch{width:32px;height:32px;border-radius:5px;}
+  .itemTile .icon{position:absolute;top:24px;left:50%;transform:translate(-50%,-50%);font-size:20px;text-shadow:0 1px 2px rgba(0,0,0,0.5);}
+  .itemTile .itemLabel{font-size:11px;text-align:center;line-height:1.2;opacity:0.9;}
+  .itemTile .itemCount{position:absolute;top:4px;right:6px;font-size:11px;font-weight:700;color:#fff;text-shadow:0 0 3px #000;}
+  #itemsGrid .sectionLabel{grid-column:1/-1;font-size:11px;text-transform:uppercase;letter-spacing:0.05em;opacity:0.55;margin:6px 0 -2px;}
+  /* --- ScoutCraft: badge toast + merit badge sash --- */
+  #badgeToast{position:fixed;top:70px;left:50%;transform:translateX(-50%);z-index:28;display:flex;align-items:center;gap:12px;
+    background:linear-gradient(#4a6b33,#355024);color:#f4f0e2;border:2px solid #c8a44d;border-radius:10px;
+    padding:10px 18px;box-shadow:0 6px 24px rgba(0,0,0,0.45);pointer-events:none;max-width:min(440px,92vw);}
+  #badgeToast .bt-emoji{font-size:30px;line-height:1;flex:none;}
+  #badgeToast .bt-text{display:flex;flex-direction:column;gap:2px;font-size:13px;line-height:1.35;}
+  #badgeToast .bt-text b{font-size:14px;}
+  #badgeToast .bt-rank{opacity:0.85;font-size:12px;}
+  #btnSash{position:fixed;bottom:104px;left:calc(50% + 92px);transform:translateX(-50%);z-index:10;
+    background:rgba(0,0,0,0.35);color:#fff;border:2px solid rgba(255,255,255,0.4);border-radius:8px;
+    padding:5px 12px;font-size:12px;cursor:pointer;white-space:nowrap;}
+  #btnSash:hover{background:rgba(0,0,0,0.55);}
+  #sashModal{position:fixed;inset:0;z-index:31;background:rgba(0,0,0,0.55);display:flex;align-items:center;justify-content:center;}
+  #sashPanel{background:#2b2320;color:#f2e9d8;width:min(620px,92vw);max-height:82vh;overflow:auto;border-radius:10px;
+    border:2px solid #5a4632;box-shadow:0 10px 40px rgba(0,0,0,0.5);}
+  #sashHeader{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid #5a4632;
+    position:sticky;top:0;background:#2b2320;}
+  #sashHeader h2{margin:0;font-size:1.2em;}
+  #sashHeader p{margin:4px 0 0;font-size:12px;opacity:0.75;}
+  #sashCount{font-weight:700;color:#e8c46a;}
+  #sashClose{background:none;border:none;color:#f2e9d8;font-size:1.1em;cursor:pointer;padding:4px 10px;border-radius:6px;}
+  #sashClose:hover{background:rgba(255,255,255,0.12);}
+  #sashGrid{padding:16px 18px;display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:12px;}
+  .badgeTile{background:rgba(255,255,255,0.05);border:2px solid rgba(255,255,255,0.08);border-radius:10px;
+    padding:12px 10px;display:flex;flex-direction:column;align-items:center;gap:5px;text-align:center;}
+  .badgeTile .badgeEmoji{font-size:30px;line-height:1;filter:grayscale(1);opacity:0.4;}
+  .badgeTile .badgeName{font-size:13px;font-weight:700;opacity:0.65;}
+  .badgeTile .badgeHint{font-size:11px;line-height:1.35;opacity:0.6;}
+  .badgeTile.earned{background:rgba(200,164,77,0.14);border-color:#c8a44d;}
+  .badgeTile.earned .badgeEmoji{filter:none;opacity:1;}
+  .badgeTile.earned .badgeName{opacity:1;color:#f0dfa8;}
+  .badgeTile.earned .badgeHint{opacity:0.85;color:#c8e0a8;}
+  .badgeBar{width:100%;height:5px;border-radius:3px;background:rgba(255,255,255,0.12);overflow:hidden;margin-top:3px;}
+  .badgeBar span{display:block;height:100%;background:#8bb05a;}
+  .badgeProg{font-size:10px;opacity:0.6;}
+  [hidden]{display:none!important;}
+</style>
+</head>
+<body>
+<div id="hud">📍<span id="coordsLabel">0, 0, 0</span> · Edits <span id="blockCount">0</span> · <span id="fps">0</span>fps · 👥<span id="playerCount">1</span> · <span id="mpStatus">Connecting…</span> · 📅<span id="dateLabel">Jan 1, Y0</span> · 🕐<span id="worldTimeLabel">00:00</span><span id="timeModeLabel"></span> · <span id="weatherLabel">Sunny</span> · <span id="windLabel">Calm</span> · <span id="seasonLabel">Spring</span> <span id="tempLabel">50°F</span> · 🐛<span id="wormCount">0</span> · 🦋<span id="butterflyCount">0</span> · 🎖️<span id="badgeCount">0/13</span> · <span id="rankLabel">Tenderfoot</span></div>
+<div id="debugPanel" hidden></div>
+<div id="updateBanner" hidden>🔄 A new version of ScoutCraft is available <button id="updateReloadBtn">Reload</button></div>
+<div id="minimap"><canvas id="minimapCanvas" width="160" height="160"></canvas></div>
+<div id="hearts"></div>
+<div id="hunger"></div>
+<div id="deathMessage" hidden>You died</div>
+<div id="hurtOverlay"></div>
+<div id="lightningFlash"></div>
+<div id="badgeToast" hidden></div>
+<div id="crosshair"></div>
+<div id="hotbar"></div>
+<div id="hint">Left click: break / attack &nbsp;·&nbsp; Right click: place (or cook raw meat on a campfire / take a bearing with the compass / open a table / toggle a window or door) &nbsp;·&nbsp; Q R F T G C X Z B: select item &nbsp;·&nbsp; I: pack &nbsp;·&nbsp; M: badge sash &nbsp;·&nbsp; E: craft &nbsp;·&nbsp; V: 3rd person &nbsp;·&nbsp; Ctrl: hold to crawl &nbsp;·&nbsp; L: toggle crawl &nbsp;·&nbsp; N: cycle day/night &nbsp;·&nbsp; Enter: chat &nbsp;·&nbsp; Esc: release mouse</div>
+<div id="craftHint">Right-click the table (or press E) to craft</div>
+<div id="chatLog"></div>
+<div id="chatInputBar" hidden><input id="chatInput" type="text" maxlength="200" placeholder="Press Enter to send, Esc to cancel" autocomplete="off"></div>
+<div id="touchControls" hidden>
+  <div id="touchLookZone"></div>
+  <div id="joystickBase"><div id="joystickKnob"></div></div>
+  <button id="btnAttack" class="touchBtn" aria-label="Break / attack">⛏</button>
+  <button id="btnPlace" class="touchBtn" aria-label="Place / interact">▦</button>
+  <button id="btnJump" class="touchBtn" aria-label="Jump">JUMP</button>
+  <button id="btnCrawl" class="touchBtn" aria-label="Hold to crawl">CRAWL</button>
+  <button id="btn3p" class="touchBtn" aria-label="Toggle third person">3rd</button>
+  <button id="btnTime" class="touchBtn" aria-label="Cycle day/night">🕐</button>
+  <button id="btnChat" class="touchBtn" aria-label="Open chat">💬</button>
+</div>
+<div id="craftingModal" hidden>
+  <div id="craftingPanel">
+    <div id="craftingHeader">
+      <h2>Camp Workbench</h2>
+      <button id="craftingClose" aria-label="Close">Close ✕</button>
+    </div>
+    <div id="craftingInventory"></div>
+    <div id="craftingRecipes"></div>
+  </div>
+</div>
+<button id="btnItems">🎒 Inventory</button>
+<button id="btnSash">🎖️ Badges</button>
+<div id="itemsModal" hidden>
+  <div id="itemsPanel">
+    <div id="itemsHeader">
+      <div>
+        <h2>Inventory</h2>
+        <p>Tap an item to put it in hotbar slot <span id="itemsSlotNum">1</span></p>
+      </div>
+      <button id="itemsClose" aria-label="Close">Close ✕</button>
+    </div>
+    <div id="itemsGrid"></div>
+  </div>
+</div>
+<div id="sashModal" hidden>
+  <div id="sashPanel">
+    <div id="sashHeader">
+      <div>
+        <h2>Merit Badge Sash — <span id="sashCount">0 of 13</span></h2>
+        <p id="sashRank">Tenderfoot</p>
+      </div>
+      <button id="sashClose" aria-label="Close">Close ✕</button>
+    </div>
+    <div id="sashGrid"></div>
+  </div>
+</div>
+<div id="overlay">
+  <h1>ScoutCraft</h1>
+  <p id="controlsText">
+    Set up camp in the wilderness and earn your merit badges — a browser voxel world where
+    woodcraft, firecraft and a good tent actually count for something.<br><br>
+    <span class="key">WASD</span> move &nbsp; <span class="key">Space</span> jump &nbsp; <span class="key">Shift</span> sprint &nbsp; <span class="key">Ctrl</span> crawl &nbsp; <span class="key">L</span> toggle crawl<br>
+    <span class="key">Mouse</span> look &nbsp; <span class="key">Left click</span> break / attack &nbsp; <span class="key">Right click</span> place<br>
+    <span class="key">Q R F T G C X Z B</span> select item &nbsp; <span class="key">I</span> pack &nbsp; <span class="key">M</span> badge sash &nbsp; <span class="key">E</span> craft at workbench &nbsp; <span class="key">V</span> 3rd person &nbsp; <span class="key">N</span> cycle day/night &nbsp; <span class="key">Enter</span> chat
+  </p>
+  <div id="nameEntry"><input id="nameInput" type="text" maxlength="16" placeholder="Your name" autocomplete="off"></div>
+  <p id="tapToPlay"><strong>Click anywhere to play</strong></p>
+  <p id="playHint" class="small">Chop a tree for wood and leaves, put down your Camp Workbench, and press E beside it to craft. Twist leaves into <b>rope</b>, then build a <b>tent</b>, a <b>campfire</b>, a <b>lantern</b>, a <b>compass</b> and your <b>troop flag</b> — each one earns a merit badge, and badges promote you from Tenderfoot all the way to Eagle Scout. Press <span class="key">M</span> to see your sash. Cook raw meat on a campfire for a meal worth twice as much. Cows and sheep are harmless — dogs, giraffes, lions and elephants fight back, and lions and elephants attack on sight. Progress saves automatically in this browser.</p>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-database-compat.js"></script>
+<script src="firebase-config.js"></script>
+<script src="main.js"></script>
+</body>
+</html>
