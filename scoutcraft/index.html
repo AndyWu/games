@@ -43,6 +43,7 @@
   #hunger{position:fixed;top:34px;left:50%;transform:translateX(-50%);display:flex;gap:2px;z-index:10;font-size:16px;text-shadow:0 0 3px #000;pointer-events:none;}
   #deathMessage{position:fixed;top:35%;left:50%;transform:translate(-50%,-50%);color:#e05a4a;font-size:2em;font-weight:700;text-shadow:0 0 8px rgba(0,0,0,0.8);z-index:15;pointer-events:none;}
   #hurtOverlay{position:fixed;inset:0;z-index:14;pointer-events:none;opacity:0;background:radial-gradient(ellipse at center, rgba(180,0,0,0) 35%, rgba(180,0,0,0.55) 100%);}
+  #sleepOverlay{position:fixed;inset:0;z-index:15;pointer-events:none;opacity:0;background:#000;}
   #lightningFlash{position:fixed;inset:0;z-index:13;pointer-events:none;opacity:0;background:#fff;}
   #hint{position:fixed;bottom:80px;left:50%;transform:translateX(-50%);color:#fff;font-size:12px;text-shadow:0 0 3px #000;z-index:10;opacity:0.85;white-space:nowrap;pointer-events:none;}
   body.touch-device #hint{display:none;}
@@ -160,11 +161,12 @@
 <div id="hunger"></div>
 <div id="deathMessage" hidden>You died</div>
 <div id="hurtOverlay"></div>
+<div id="sleepOverlay"></div>
 <div id="lightningFlash"></div>
 <div id="badgeToast" hidden></div>
 <div id="crosshair"></div>
 <div id="hotbar"></div>
-<div id="hint">Left click: break / attack &nbsp;·&nbsp; Right click: place (or cook raw meat on a campfire / take a bearing with the compass / open a table / toggle a window or door) &nbsp;·&nbsp; Q R F T G C X Z B: select item &nbsp;·&nbsp; I: pack &nbsp;·&nbsp; M: badge sash &nbsp;·&nbsp; E: craft &nbsp;·&nbsp; V: 3rd person &nbsp;·&nbsp; Ctrl: hold to crawl &nbsp;·&nbsp; L: toggle crawl &nbsp;·&nbsp; N: cycle day/night &nbsp;·&nbsp; Enter: chat &nbsp;·&nbsp; Esc: release mouse</div>
+<div id="hint">Left click: break / attack &nbsp;·&nbsp; Right click: place (or cook raw meat on a campfire / take a bearing with the compass / open a table or backpack / toggle a window or door) &nbsp;·&nbsp; Q R F T G C X Z B: select item &nbsp;·&nbsp; I: pack &nbsp;·&nbsp; M: badge sash &nbsp;·&nbsp; E: craft &nbsp;·&nbsp; K: sleep in tent &nbsp;·&nbsp; V: 3rd person &nbsp;·&nbsp; Ctrl: hold to crawl &nbsp;·&nbsp; L: toggle crawl &nbsp;·&nbsp; N: cycle day/night &nbsp;·&nbsp; Enter: chat &nbsp;·&nbsp; Esc: release mouse</div>
 <div id="craftHint">Right-click the table (or press E) to craft</div>
 <div id="chatLog"></div>
 <div id="chatInputBar" hidden><input id="chatInput" type="text" maxlength="200" placeholder="Press Enter to send, Esc to cancel" autocomplete="off"></div>
@@ -222,11 +224,11 @@
     woodcraft, firecraft and a good tent actually count for something.<br><br>
     <span class="key">WASD</span> move &nbsp; <span class="key">Space</span> jump &nbsp; <span class="key">Shift</span> sprint &nbsp; <span class="key">Ctrl</span> crawl &nbsp; <span class="key">L</span> toggle crawl<br>
     <span class="key">Mouse</span> look &nbsp; <span class="key">Left click</span> break / attack &nbsp; <span class="key">Right click</span> place<br>
-    <span class="key">Q R F T G C X Z B</span> select item &nbsp; <span class="key">I</span> pack &nbsp; <span class="key">M</span> badge sash &nbsp; <span class="key">E</span> craft at workbench &nbsp; <span class="key">V</span> 3rd person &nbsp; <span class="key">N</span> cycle day/night &nbsp; <span class="key">Enter</span> chat
+    <span class="key">Q R F T G C X Z B</span> select item &nbsp; <span class="key">I</span> pack &nbsp; <span class="key">M</span> badge sash &nbsp; <span class="key">E</span> craft at workbench &nbsp; <span class="key">K</span> sleep in tent &nbsp; <span class="key">V</span> 3rd person &nbsp; <span class="key">N</span> cycle day/night &nbsp; <span class="key">Enter</span> chat
   </p>
   <div id="nameEntry"><input id="nameInput" type="text" maxlength="16" placeholder="Your name" autocomplete="off"></div>
   <p id="tapToPlay"><strong>Click anywhere to play</strong></p>
-  <p id="playHint" class="small">Chop a tree for wood and leaves, put down your Camp Workbench, and press E beside it to craft. Twist leaves into <b>rope</b>, then build a <b>tent</b>, a <b>campfire</b>, a <b>lantern</b>, a <b>compass</b> and your <b>troop flag</b> — each one earns a merit badge, and badges promote you from Tenderfoot all the way to Eagle Scout. Press <span class="key">M</span> to see your sash. Cook raw meat on a campfire for a meal worth twice as much. Cows and sheep are harmless — dogs, giraffes, lions and elephants fight back, and lions and elephants attack on sight. Progress saves automatically in this browser.</p>
+  <p id="playHint" class="small">Chop a tree for wood and leaves, put down your Camp Workbench, and press E beside it to craft. Twist leaves into <b>rope</b>, then build a <b>tent</b> you can actually walk into, a <b>campfire</b>, a <b>lantern</b>, a <b>compass</b>, a <b>backpack</b> and your <b>troop flag</b> — each one earns a merit badge, and badges promote you from Tenderfoot all the way to Eagle Scout. Press <span class="key">M</span> to see your sash, or <span class="key">K</span> near your tent after dark to sleep through the night. Cook raw meat on a campfire for a meal worth twice as much. Rabbits and deer are harmless — moose fight back if provoked, and wolves and the black bear attack on sight. Progress saves automatically in this browser.</p>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>

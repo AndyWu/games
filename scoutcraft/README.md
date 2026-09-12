@@ -48,11 +48,12 @@ Then visit `http://localhost:8000`.
 - `Shift` — sprint
 - Mouse — look (click the page first to lock the pointer)
 - Left click — break block, or attack whatever animal/player you're looking at within range
-- Right click — place block. Or, depending on what you're holding and what you're aiming at: cook Raw Meat on a Campfire, take a bearing with the Compass, eat a meal, open the Camp Workbench, toggle a window/door open or closed, or light a fire with Flint aimed at wood or leaves
+- Right click — place block. Or, depending on what you're holding and what you're aiming at: cook Raw Meat on a Campfire, take a bearing with the Compass, eat a meal, open the Camp Workbench or a placed Backpack, toggle a window/door open or closed, or light a fire with Flint aimed at wood or leaves
 - `Q` `R` `F` `T` `G` `C` `X` `Z` `B` — select a hotbar slot directly (no number keys, no scroll-wheel cycling)
 - `I` (or click the currently-selected hotbar slot again, or the **🎒 Inventory** button) — open your inventory and choose what that slot holds
 - `E` — open/close crafting when standing near a Camp Workbench
 - `M` (or the **🎖️ Badges** button) — open your merit badge sash
+- `K` — sleep through the night, if you're near your tent and it's after dark
 - `V` — toggle third-person camera (see your own blocky character)
 
 On a phone or tablet (iPad included), the game automatically switches to touch controls — no setup needed, just open the page in Safari and tap to play:
@@ -116,7 +117,7 @@ want and how far along you are ("14 / 25 wood").
 | 🥾 | Hiking | Hike 1,000 blocks on foot |
 | 🏊 | Swimming | Swim 60 blocks |
 | 🧗 | Climbing | Get 18 blocks above sea level |
-| 🐘 | Nature Study | Study all 6 animals up close — lions and elephants included |
+| 🦌 | Nature Study | Study all 5 animals up close — the bear and moose included |
 | 🦉 | Night Watch | Spend 5 minutes outdoors after dark |
 | ⛑️ | First Aid | Heal back to full health after nearly dying |
 | 🚩 | Troop Flag | Raise your troop flag at camp |
@@ -130,17 +131,22 @@ Progress is per-browser, saved to `localStorage` alongside your world edits and 
 counts while you're actually playing — nothing accrues while you sit on the start screen or have a
 panel open. Distance ignores teleport-sized jumps, so a respawn doesn't quietly hand you Hiking.
 
-Nature Study deliberately tracks only the six ground animals and only within 9 blocks: birds are
+Nature Study deliberately tracks only the five ground animals and only within 9 blocks: birds are
 spawned to circle wherever the player is and fish fill every pond, so counting them made the badge
-free. Walking up to a lion or an elephant, on the other hand, is a genuine dare — both attack on
+free. Walking up to the black bear or a wolf, on the other hand, is a genuine dare — both attack on
 sight.
 
 ## Camp gear
 
-Six craftable things the badges are built around. Break any of them to pick it back up.
+Seven craftable things the badges are built around. Break any of them to pick it back up — for the
+tent, breaking any single wall takes the whole shelter down and hands back just one Tent item, not
+one per block.
 
 - **Rope** — twisted from leaves. Pure crafting material; the Tent and Troop Flag both need it.
-- **Tent** — a green canvas A-frame. A solid block, so you can stack several into a real shelter.
+- **Tent** — not just a block: placing one builds a real walk-in shelter — three canvas walls and a
+  flat roof around one tile of floor space, with a one-block gap left open at the front so you can
+  actually step inside. It's oriented by which way you're facing when you place it, the same way a
+  Door picks its width — the doorway always ends up facing back toward you.
 - **Campfire** — the middle of camp. A permanent, harmless block (unlike wildfire `FIRE`, which
   burns out, spreads and hurts) that throws warm light over the whole clearing. Your **first**
   campfire is what the compass treats as camp from then on.
@@ -149,7 +155,15 @@ Six craftable things the badges are built around. Break any of them to pick it b
 - **Compass** — right-click it anywhere in the world and it tells you how far camp is and which
   way, as a real bearing: *"🧭 Camp: 34 blocks NNE."* Before you've lit a campfire it points to the
   middle of the map instead.
+- **Backpack** — a camp fixture that doubles as a shortcut: right-click a placed one to open your
+  pack, the same panel the `I` key opens, so you can check what you're carrying without reaching
+  for the keyboard while your hands are full setting up camp.
 - **Troop Flag** — a red pennant on a pole. Purely yours to plant, and the last badge on the sash.
+
+**Sleep:** stand near your tent after dark and press `K`. It's local to you only — like the `N` key's
+day/night override, it can't skip the night for anyone else in the shared world — but it fully
+restores your health and hunger and jumps your own view straight to morning. Try it before dark, or
+too far from any tent, and it just tells you why not instead of doing anything.
 
 **Cooking:** hold Raw Meat, aim at a Campfire and right-click. A Cooked Meal restores twice the
 hunger raw meat does (8 points against 4), which is the practical payoff for earning Firecraft.
@@ -193,18 +207,17 @@ Doors are person-sized: placing one fills a 2-wide × 3-tall opening (windows st
 
 ## Health & combat
 
-Every human player has 10 hearts (20 HP), shown at the top of the screen. The world has six kinds of animals, each with HP scaled against that 10-heart baseline to roughly track their real-world size and toughness:
+Every human player has 10 hearts (20 HP), shown at the top of the screen. The world has five kinds of animals, each with HP scaled against that 10-heart baseline to roughly track their real-world size and toughness:
 
-| Animal   | HP (hearts) | Attacks back? | Attacks on sight? |
-|----------|-------------|----------------|--------------------|
-| Sheep    | 3           | No             | No                 |
-| Dog      | 4           | Yes            | No                 |
-| Cow      | 5           | No             | No                 |
-| Giraffe  | 8           | Yes            | No                 |
-| Lion     | 10          | Yes            | Yes (within ~6 blocks) |
-| Elephant | 20          | Yes            | Yes (within ~6 blocks) |
+| Animal | HP (hearts) | Attacks back? | Attacks on sight? |
+|--------|-------------|----------------|--------------------|
+| Rabbit | 1           | No             | No                 |
+| Deer   | 4           | No             | No                 |
+| Wolf   | 6           | Yes            | Yes (within ~6 blocks) |
+| Bear   | 16          | Yes            | Yes (within ~6 blocks) |
+| Moose  | 18          | Yes            | No                 |
 
-Cows and sheep are always harmless — you can hit them but they never fight back. Dogs and giraffes only turn hostile once you attack them. Lions and elephants will charge and attack on their own if you wander too close, whether or not you've touched them. Left-click anything in range to attack it (a fixed 1-heart hit, on a short cooldown); killing an animal or a player's HP dropping to 0 is synced live through Firebase, so a kill is permanent for everyone in the shared world, not just you. Dying freezes you in place for 3 seconds (with a respawn countdown on screen) before resetting you to full health at a random spawn point, picked from 10 fixed spots around the map — never the same one twice in a row. Leaving the game while still alive is different: close the tab and come back later, and you'll pick up right where you left off instead of at a random spot — your last position is saved in this browser every few seconds while you play. Dying clears that saved spot, so a death always still sends you to a random spawn point next time, not back to wherever you fell.
+Rabbits and deer are always harmless — you can hit them but they never fight back. The moose only turns hostile once you attack it. Wolves and the black bear will charge and attack on their own if you wander too close, whether or not you've touched them. Left-click anything in range to attack it (a fixed 1-heart hit, on a short cooldown); killing an animal or a player's HP dropping to 0 is synced live through Firebase, so a kill is permanent for everyone in the shared world, not just you. Dying freezes you in place for 3 seconds (with a respawn countdown on screen) before resetting you to full health at a random spawn point, picked from 10 fixed spots around the map — never the same one twice in a row. Leaving the game while still alive is different: close the tab and come back later, and you'll pick up right where you left off instead of at a random spot — your last position is saved in this browser every few seconds while you play. Dying clears that saved spot, so a death always still sends you to a random spawn point next time, not back to wherever you fell.
 
 Climbing onto a short ledge or wading a little into deep water doesn't make a hostile animal give up — if it can't physically walk the rest of the way to you (a real height drop it can't climb, or water it won't cross), it can still lunge and land a hit as long as you're within a generous reach measured in real 3D space, not just flat ground distance. Get far enough away — a real cliff, open water well off the shore — and you're genuinely out of reach; a short obstacle just outside its normal attack range isn't.
 
@@ -212,7 +225,7 @@ Animals are solid, not something you can walk or fall straight through — jump 
 
 Animals reproduce: whenever two of the same species wander within about 2 blocks of each other, a baby of that type is born right at the midpoint between them, and each of the two parents needs 30 in-game days (30 real hours) to cool down before it can trigger another birth. Left unattended over a long enough session, herds slowly grow on their own.
 
-The world starts out with a real herd of each: 16 cows, 20 sheep, 12 dogs, 12 giraffes, 8 lions, and 8 elephants (4x the original starting numbers), and any that die respawn gradually to keep the population back up to those same counts.
+The world starts out with 10 rabbits, 5 deer, 2 wolves, 1 black bear, and 1 moose, and any that die respawn gradually to keep the population back up to those same counts.
 
 ### Hunger
 
@@ -220,24 +233,23 @@ You also have a hunger bar (10 drumsticks, right under your hearts) that empties
 
 Killing an animal always drops Meat — bigger animals drop more:
 
-| Animal   | Meat dropped |
-|----------|--------------|
-| Sheep    | 1            |
-| Dog      | 1            |
-| Lion     | 2            |
-| Cow      | 2            |
-| Giraffe  | 3            |
-| Elephant | 4            |
+| Animal | Meat dropped |
+|--------|--------------|
+| Rabbit | 1            |
+| Deer   | 2            |
+| Wolf   | 2            |
+| Bear   | 3            |
+| Moose  | 5            |
 
 Select Meat in your hotbar and right-click (or the place/interact button on touch) to eat a piece — each one refills 2 drumsticks, up to the max. Meat is eat-only; it can't be placed as a block. You don't need to free up a hotbar slot for it, either — open your inventory (`I`, or the Inventory button on touch) and click Meat directly to eat a piece on the spot.
 
-Every animal is modeled at real-world scale — world units are ~1 unit = 1 meter throughout, the same scale the 1.8-unit-tall player uses. That means giraffes and elephants tower well over you. Bigger animals also get a proportionally longer attack reach so their size isn't just cosmetic. An elephant's trunk in particular hangs a good 2.8 blocks long, curling down toward the ground rather than reading as a stub.
+Every animal is modeled at real-world scale — world units are ~1 unit = 1 meter throughout, the same scale the 1.8-unit-tall player uses. That means a moose, at a good 2.1 blocks at the shoulder before you even count its antlers, towers well over you. Bigger animals also get a proportionally longer attack reach so their size isn't just cosmetic — a moose's kick reaches out a full block.
 
 Killing off a species doesn't leave the world permanently empty — every animal type slowly respawns over time (checked periodically, replacing at most one missing animal every few seconds, so it never feels like a sudden burst) until each species is back to its starting population.
 
-Animal *placement* is deterministic (same seed for everyone), but their movement/AI runs independently on each client — so you and another player may see the same herd in slightly different spots or mid-wander differently, even though a kill is always shared. Animals only ever spawn standing on actual ground — never floating in a tree's trunk or canopy — and each species has its own procedurally-drawn hide texture (cow patches, giraffe spots, sheep wool, etc.), same technique as the block textures.
+Animal *placement* is deterministic (same seed for everyone), but their movement/AI runs independently on each client — so you and another player may see the same herd in slightly different spots or mid-wander differently, even though a kill is always shared. Animals only ever spawn standing on actual ground — never floating in a tree's trunk or canopy — and each species has its own procedurally-drawn hide texture (a deer's reddish coat, a wolf's grey streaks, a moose's leathery wrinkles, etc.), same technique as the block textures.
 
-Falling more than 3 blocks also hurts — you take damage roughly proportional to how far you fell beyond that. Taking any damage (from an animal, another player, or a fall) flashes a red vignette around the edge of the screen, and every action has a small sound effect synthesized on the fly with the Web Audio API. Lions let out a roar the moment they turn hostile — whether that's from you attacking one or just wandering too close — and it's an actual public-domain lion recording (trimmed to ~2 seconds), not a synthesized sound; see [`assets/README.md`](assets/README.md) for the source and license. Everything else audio-wise, along with all the textures, is generated procedurally with no external files.
+Falling more than 3 blocks also hurts — you take damage roughly proportional to how far you fell beyond that. Taking any damage (from an animal, another player, or a fall) flashes a red vignette around the edge of the screen, and every action has a small sound effect synthesized on the fly with the Web Audio API. The black bear lets out a roar the moment it turns hostile — whether that's from you attacking it or just wandering too close — reusing the same public-domain roar recording (trimmed to ~2 seconds) that Blockcraft uses for its lions, since a real bear growl wasn't available; see [`assets/README.md`](assets/README.md) for the source and license. Everything else audio-wise, along with all the textures, is generated procedurally with no external files.
 
 Stand still for a couple of seconds and your health slowly regenerates, half a heart at a time, until you're back to full — moving or taking damage resets that timer.
 
@@ -295,15 +307,14 @@ While you're playing, the game quietly checks every 5 minutes whether `main.js` 
 - Trees come in 7 species — oak, pine, birch, willow, maple, redwood, and apple — each with its own leaf and trunk coloring (birch's pale trunk, maple's red-orange leaves, redwood's dark canopy over a deep red-brown trunk, apple trees dotted with little red fruit-colored leaves, and so on) and its own canopy density — pine and redwood read as full, dense evergreens, birch and willow as wispy and open, the rest in between — picked deterministically per tree so it's consistent and doesn't need saving. This is purely a visual variation — chopping any of them still gives you the same plain Wood/Leaves items, nothing new to collect. A tree's whole trunk (even a 5x giant's) is always one consistent species end to end, and only wood that's actually got a canopy overhead gets tinted, so ordinary wood structures you build stay their normal color.
 - A worm spawns on one of the world's trees the first time anyone loads the shared world. It eats a nearby leaf block once every 0.4 in-game hours (1 real minute, since a full in-game day is 1 real hour — a genuine, permanent world edit, same as if you'd broken it yourself) and has 2 children near itself once every 1 in-game hour (2.5 real minutes), so the population grows quickly over a play session and keeps on eating (capped at 100 so it can't run away entirely). Standing in an active fire kills it instantly, same as it would a player or animal, and stepping directly on one squashes it — dropping a piece of Meat, same as any other kill. Birds also snack on worms, eating one every so often if there's one close by, but only once the worm population is 10 or higher, so birds alone can never wipe worms out (a bird-eaten worm just vanishes, no meat drops — only a squash you deliver yourself does that). A worm always needs something real underneath it — a leaf it's nested in, or solid ground — never open air; eat through the leaf it's standing on (or chop down its whole tree) and it drops straight down like anything else here, lands on the ground, and slowly wanders around hunting for the nearest tree to climb back into. Worms and their eat/breed timers are saved and shared through the same multiplayer connection as everything else, so everyone sees the same worms and the population keeps growing even across reloads — in solo/offline play (no multiplayer connection) a single worm still spawns each session but doesn't persist. The current worm count is shown live in the HUD.
 - Once a worm has personally eaten 100 leaves it metamorphoses into a butterfly right where it's standing — a small, genuinely colorful (each one's own random hue and accent-spot pattern), genuinely 3D creature that flutters off and roams broadly across the map, though it always stays within 15 blocks of sea level vertically. Its two wings are real hinged geometry, not a flat cutout — they open and close in an actual up-down flap and read as a different silhouette depending which way you're looking at one, edge-on included. A butterfly lives for 30 in-game days (30 real hours) before dying of old age. Like worms, its existence is saved and shared with everyone in the world; unlike worms, its actual flight path is never sent over the network at all — every connected client computes the exact same wandering route independently from the butterfly's own id and birth time, so it moves identically everywhere with zero ongoing traffic. The current butterfly count is shown live in the HUD next to the worm count.
-- A single harmless ghost floats around at night, about a block above whatever ground is beneath it, and can drift straight through walls, hills, and trees — it simply has no collision at all. It's completely invisible in daylight, fading in at dusk and out at dawn like the fireflies. Every minute or two it likes to sneak in close behind you for a few seconds with a soft "boo," then drifts back off to wander — it never does anything more than that; it can't hurt you.
-- 30 different species of birds (robins, cardinals, eagles, hummingbirds, penguin-less but everything else you'd expect, right down to a toucan) circle through the sky around you, each with its own size, coloring, and a real 3D body with a pair of flapping wings — genuinely a different-looking silhouette depending which way you're looking at one, not a flat cutout — and occasionally give a little chirp if one happens to be close enough to actually hear. Fish are real 3D bodies too (fins, a wiggling tail), and swim within whatever body of water is nearest you, staying inside its actual depth rather than beaching themselves. Six kinds — goldfish through catfish — swim at ordinary size; two much bigger species, Sharks (a solid 2 blocks nose to tail) and the rarer Whale Shark (a full 3 blocks), are scaled-up versions of that same fish model and need genuinely deep water to spawn in, so you'll only run into one out over a real lake or the ocean, never in a shallow pond. Every fish is attackable and drops Meat when killed, scaled to size — the small schooling species drop 1 (tuna 2), a Shark drops 3, a Whale Shark 5 — and all of them keep swimming continuously, a home spot too far away smoothly drifting to a new one over a second and a half instead of teleporting. Birds also occasionally eat a nearby worm once the worm population is healthy. Like the fireflies and the ghost, birds and fish are purely local to your own view, not synced or saved.
+- 30 different species of birds (robins, cardinals, eagles, hummingbirds, penguin-less but everything else you'd expect, right down to a toucan) circle through the sky around you, each with its own size, coloring, and a real 3D body with a pair of flapping wings — genuinely a different-looking silhouette depending which way you're looking at one, not a flat cutout — and occasionally give a little chirp if one happens to be close enough to actually hear. Fish are real 3D bodies too (fins, a wiggling tail), and swim within whatever body of water is nearest you, staying inside its actual depth rather than beaching themselves. Six kinds — goldfish through catfish — swim at ordinary size; two much bigger species, Sharks (a solid 2 blocks nose to tail) and the rarer Whale Shark (a full 3 blocks), are scaled-up versions of that same fish model and need genuinely deep water to spawn in, so you'll only run into one out over a real lake or the ocean, never in a shallow pond. Every fish is attackable and drops Meat when killed, scaled to size — the small schooling species drop 1 (tuna 2), a Shark drops 3, a Whale Shark 5 — and all of them keep swimming continuously, a home spot too far away smoothly drifting to a new one over a second and a half instead of teleporting. Birds also occasionally eat a nearby worm once the worm population is healthy. Like the fireflies, birds and fish are purely local to your own view, not synced or saved.
 - 2 Giant Eagles soar much higher and range much further than the regular birds — the same bird model, just scaled up to a real wingspan, and colored like the real thing: a near-black body and wings, a white head, and the same golden beak every bird already has. Rather than drifting like a regular bird, each one actually circles a fixed point in a real loop (one clockwise, one counterclockwise), the way a real bird of prey wheels while scanning the ground below. Roughly once an in-game day, each one hunts down the 2 birds or fish currently nearest it and eats them outright — that kill is the eagle's alone, so unlike hunting one yourself it drops no Meat. They're attackable like every other creature here and worth 3 Meat if you take one down (4 HP, tougher than a regular bird). Land on one from above (jump onto its back, same as landing on any animal) and you'll ride it: it stops circling and instead flies a long, slow tour of random points across the whole map, carrying you along for free sightseeing with no fall damage no matter how high it climbs. Press `Space` to hop off wherever you are — the eagle then finds a fresh spot nearby and goes back to its usual circling.
 - Turtles paddle slowly through the water — three real kinds (Green Sea, Hawksbill, Loggerhead), each its own shell and skin coloring, with four flippers that stroke independently and a head that pokes out front. They're noticeably more leisurely than fish, drifting a shorter distance at a slower pace. Attackable like everything else here, dropping 1 Meat (2 for a Loggerhead).
 - You can swim: get into water deep enough to actually submerge you (not just ankle-deep at the shoreline, where you just walk normally along the bottom) and `Space` takes you up, `S` takes you down. `W`/`A`/`D` only ever move you horizontally in water, same as on land — they don't hold you up — and letting go of everything sinks you gently rather than floating you in place, so simply swimming forward across a lake doesn't let you cruise along the surface for free; staying up takes actually holding Space, the way real swimming does. Landing in water from a fall never deals fall damage, however far you dropped.
 - A few gophers dig slowly through the ground a handful of blocks underground, carving out real 2×2 tunnels as they wander — big enough to crawl through (see Crawling above). They're attackable (2 Meat when killed) and, like birds and fish, purely local to your own view.
 - Water flows. Break a block (or dig a tunnel) next to existing water and it spreads into the new gap on its own — down first, then sideways — filling it in a block at a time rather than all at once, the same way a hole dug at the shoreline would flood in real life. It never flows upward, so a hole in the ceiling above a lake stays dry. A dropped bucket of Water spreads the same way from wherever you place it. A single dig or placement can only push a flow so far (about 14 blocks from where it started) so one tunnel can't flood the entire map in one go — dig further and it'll just pick up the flow again from wherever it left off.
 - You can double jump: press `Space` again while already in the air (a genuine second tap, not just holding the first press down) for an extra boost, reaching noticeably higher than a single jump alone — best timed near the top of the first jump's arc. It recharges the moment you touch ground again, so it's always available for your next jump, but only once per trip through the air.
-- A full day/night cycle takes 1 real hour, with gradual multi-minute sunrise and sunset transitions (sky color, lighting, and sun position all shift smoothly). It's driven straight off the system clock, so everyone in the shared world — and your own game after a reload — is always on the same time of day with nothing to sync. The current in-world clock time (00:00 = midnight, 12:00 = noon) is shown live in the HUD as World Time. Press `N` (or the 🕐 button on touch) to cycle that clock through three modes: Regular (the normal wall-clock cycle, default), Day (frozen at noon), and Night (frozen at midnight) — everything driven by the clock follows along, including the sky, sun/moon, the temperature swing, and firefly/ghost visibility, so forcing night is a quick way to go firefly- or ghost-watching without waiting. This is purely local to you — it doesn't change what time it is for anyone else in the shared world.
+- A full day/night cycle takes 1 real hour, with gradual multi-minute sunrise and sunset transitions (sky color, lighting, and sun position all shift smoothly). It's driven straight off the system clock, so everyone in the shared world — and your own game after a reload — is always on the same time of day with nothing to sync. The current in-world clock time (00:00 = midnight, 12:00 = noon) is shown live in the HUD as World Time. Press `N` (or the 🕐 button on touch) to cycle that clock through three modes: Regular (the normal wall-clock cycle, default), Day (frozen at noon), and Night (frozen at midnight) — everything driven by the clock follows along, including the sky, sun/moon, the temperature swing, and firefly visibility, so forcing night is a quick way to go firefly-watching without waiting. This is purely local to you — it doesn't change what time it is for anyone else in the shared world.
 - A visible sun rises due east, climbs straight overhead, and sets due west (real compass directions — +X is east, -X is west) — not just a light getting brighter/dimmer — and terrain, trees, players, and animals all cast real shadows that swing around to match — the shadow "camera" quietly follows you rather than trying to cover the whole world, so it stays sharp wherever you are. At night a moon takes its place on the opposite side of the sky, also crossing east to west on that same track, waxing and waning through real lunar phases (new → first quarter → full → last quarter → new) on the actual ~29.5-day lunar cycle — anchored so 2026-09-06, 8:00 AM Pacific is exactly a full moon — rather than the game's own sped-up clock, so it changes at the same pace the real moon does.
 - There's also a full 12-month calendar shown live in the HUD next to World Time (e.g. "Feb 22, Y2"), independent from the season/temperature system above. It's anchored so that 2026-09-06, 8:00 AM Pacific is exactly Year 0, January 1 — every real hour after that is one calendar month (a nominal 30-day month, so the day-of-month ticks forward every 2 real minutes), and every 12 months rolls the year over. Since it's purely derived from the system clock like everything else here, it's automatically the same date for everyone, with nothing to save or sync.
 - Weather rolls a new pattern roughly every 20 minutes and blends into it gradually over about a minute and a half (shown in the top-left HUD), also derived from the system clock so it's the same for everyone. The 20-minute roll picks from: Sunny (50% of the time), Cloudy (15%), Rainy (20%), Rainstorm (10%), or a Heavy Thunderstorm (5%) with lightning flashes and thunder. Worse weather dims the lighting and shortens how far you can see.

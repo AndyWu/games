@@ -21,9 +21,10 @@ const SAPLING=17;
 const FLINT=18, FIRE=19, TORCH=20, FIREWORK=21, LADDER=22, MEAT=23;
 // ---------- ScoutCraft camp gear ----------
 // ROPE, COMPASS and COOKED_MEAT are carried items — you never place them as blocks (right-clicking
-// them does something instead, see doInteract). TENT, CAMPFIRE, LANTERN and FLAG are real blocks
-// that go in the world; CAMPFIRE and LANTERN also give off light (see updateTorchLight).
-const ROPE=24, TENT=25, CAMPFIRE=26, LANTERN=27, FLAG=28, COMPASS=29, COOKED_MEAT=30;
+// them does something instead, see doInteract). TENT, CAMPFIRE, LANTERN, FLAG and BACKPACK are real
+// blocks that go in the world; CAMPFIRE and LANTERN also give off light (see updateTorchLight). TENT
+// isn't a single cube like the rest — placing one builds a small walk-in shelter (see placeTent).
+const ROPE=24, TENT=25, CAMPFIRE=26, LANTERN=27, FLAG=28, COMPASS=29, COOKED_MEAT=30, BACKPACK=31;
 
 // Every ScoutCraft client talks to the same Firebase project as Blockcraft, so each game keeps its
 // own subtree — ScoutCraft scouts share a world with each other, never with Blockcraft players.
@@ -60,6 +61,7 @@ const BLOCK_COLOR = {
   [FLAG]: 0xc23b28,
   [COMPASS]: 0xd8d2c0,
   [COOKED_MEAT]: 0x8f4a2c,
+  [BACKPACK]: 0x6b4a2f,
 };
 const BLOCK_NAME = {
   [GRASS]:'Grass', [DIRT]:'Dirt', [STONE]:'Stone', [SAND]:'Sand', [WOOD]:'Wood',
@@ -69,13 +71,13 @@ const BLOCK_NAME = {
   [SAPLING]:'Sapling', [FLINT]:'Flint', [FIRE]:'Fire', [TORCH]:'Torch', [FIREWORK]:'Firework',
   [LADDER]:'Ladder', [MEAT]:'Raw Meat',
   [ROPE]:'Rope', [TENT]:'Tent', [CAMPFIRE]:'Campfire', [LANTERN]:'Lantern',
-  [FLAG]:'Troop Flag', [COMPASS]:'Compass', [COOKED_MEAT]:'Cooked Meal',
+  [FLAG]:'Troop Flag', [COMPASS]:'Compass', [COOKED_MEAT]:'Cooked Meal', [BACKPACK]:'Backpack',
 };
 // Every item the player can ever select. The hotbar only shows HOTBAR_SIZE of these at a time —
 // the rest are reachable through the Items panel (the palette button, or the "I" key), which lets
 // the player swap any hotbar slot for anything in this list.
 const ALL_ITEMS = [GRASS, DIRT, STONE, SAND, WOOD, LEAVES, PLANKS, WATER, CRAFTING_TABLE, BRICKS, STICK, WINDOW, DOOR, FLINT, TORCH, FIREWORK, LADDER, MEAT,
-  ROPE, TENT, CAMPFIRE, LANTERN, FLAG, COMPASS, COOKED_MEAT];
+  ROPE, TENT, CAMPFIRE, LANTERN, FLAG, COMPASS, COOKED_MEAT, BACKPACK];
 const HOTBAR_SIZE = 9;
 // A scout's starting kit: building materials first, then the camp gear you earn badges with.
 const DEFAULT_HOTBAR = [WOOD, PLANKS, STONE, CRAFTING_TABLE, CAMPFIRE, TENT, FLAG, FLINT, COMPASS];
@@ -94,13 +96,15 @@ function loadHotbar(){
 // A few items are structures/tools, not plain materials — give them a distinct glyph on top of
 // their swatch so they read at a glance instead of just being "another colored square."
 const HOTBAR_ICON = { [CRAFTING_TABLE]: '🛠️', [WINDOW]: '🪟', [DOOR]: '🚪', [FLINT]: '🪨', [TORCH]: '🕯️', [FIREWORK]: '🎆', [LADDER]: '🪜', [MEAT]: '🍗',
-  [ROPE]: '🪢', [TENT]: '⛺', [CAMPFIRE]: '🔥', [LANTERN]: '🏮', [FLAG]: '🚩', [COMPASS]: '🧭', [COOKED_MEAT]: '🍖' };
+  [ROPE]: '🪢', [TENT]: '⛺', [CAMPFIRE]: '🔥', [LANTERN]: '🏮', [FLAG]: '🚩', [COMPASS]: '🧭', [COOKED_MEAT]: '🍖', [BACKPACK]: '🎒' };
 // Blocks with an open/closed state: right-clicking one toggles it to the other id in this map.
 const TOGGLE_MAP = { [WINDOW]:WINDOW_OPEN, [WINDOW_OPEN]:WINDOW, [DOOR]:DOOR_OPEN, [DOOR_OPEN]:DOOR };
 // Breaking the open form of a toggleable block gives you back its closed (placeable) form.
 const COLLECT_AS = { [WINDOW_OPEN]:WINDOW, [DOOR_OPEN]:DOOR };
+// TENT isn't here — it's a whole multi-block shelter now, not one cube, so breaking it back into a
+// single carriable item needs the flood-fill in findTentCells rather than this simple 1-for-1 map.
 const COLLECTIBLE = new Set([GRASS, DIRT, STONE, SAND, WOOD, LEAVES, PLANKS, CRAFTING_TABLE, BRICKS, WINDOW, WINDOW_OPEN, DOOR, DOOR_OPEN, TORCH, LADDER,
-  TENT, CAMPFIRE, LANTERN, FLAG]);
+  CAMPFIRE, LANTERN, FLAG, BACKPACK]);
 
 // ---------- Health / combat ----------
 const HP_PER_HEART = 2;
@@ -133,17 +137,16 @@ const STARVE_DAMAGE = 1;
 const MEAT_HUNGER_RESTORE = 4; // 2 icons per piece eaten
 
 // HP is scaled against the 20-HP (10-heart) human baseline to roughly track real-world size/toughness:
-// sheep and dogs are small and fragile; cows are human-sized; giraffes are big but not armored;
-// lions match a human in raw toughness (they're dangerous because of their attack, not their HP);
-// elephants are the toughest land animal, at double human HP.
-const ANIMAL_TYPES = ['cow','sheep','dog','giraffe','lion','elephant'];
+// rabbits and deer are small and fragile prey; wolves match a human in raw toughness (they're
+// dangerous because of their attack and pack speed, not their HP); a black bear is a serious tank;
+// a moose is the toughest animal in the woods, nearly bear-sized HP with a kick to match.
+const ANIMAL_TYPES = ['rabbit','deer','wolf','bear','moose'];
 const ANIMAL_STATS = {
-  sheep:    { maxHp: 3*HP_PER_HEART,  dmg:0, retaliate:false, aggressive:false, speed:1.0, chaseSpeed:1.8, reach:0 },
-  dog:      { maxHp: 4*HP_PER_HEART,  dmg:1, retaliate:true,  aggressive:false, speed:1.4, chaseSpeed:3.4, reach:0.15 },
-  cow:      { maxHp: 5*HP_PER_HEART,  dmg:0, retaliate:false, aggressive:false, speed:0.9, chaseSpeed:1.6, reach:0 },
-  giraffe:  { maxHp: 8*HP_PER_HEART,  dmg:3, retaliate:true,  aggressive:false, speed:1.1, chaseSpeed:2.6, reach:0.8 },
-  lion:     { maxHp: 10*HP_PER_HEART, dmg:4, retaliate:true,  aggressive:true,  speed:1.2, chaseSpeed:3.8, reach:0.4 },
-  elephant: { maxHp: 20*HP_PER_HEART, dmg:6, retaliate:true,  aggressive:true,  speed:0.8, chaseSpeed:2.4, reach:2.0 },
+  rabbit: { maxHp: 1*HP_PER_HEART,  dmg:0, retaliate:false, aggressive:false, speed:1.6, chaseSpeed:1.6, reach:0 },
+  deer:   { maxHp: 4*HP_PER_HEART,  dmg:0, retaliate:false, aggressive:false, speed:1.3, chaseSpeed:2.2, reach:0 },
+  wolf:   { maxHp: 6*HP_PER_HEART,  dmg:3, retaliate:true,  aggressive:true,  speed:1.3, chaseSpeed:4.0, reach:0.2 },
+  bear:   { maxHp: 16*HP_PER_HEART, dmg:5, retaliate:true,  aggressive:true,  speed:0.9, chaseSpeed:3.2, reach:0.6 },
+  moose:  { maxHp: 18*HP_PER_HEART, dmg:5, retaliate:true,  aggressive:false, speed:1.0, chaseSpeed:2.8, reach:1.0 },
 };
 
 // ---------- Real-world scale ----------
@@ -152,12 +155,12 @@ const ANIMAL_STATS = {
 // player is 1.8 units tall). ANIMAL_SCALE is derived once below by comparing this target height
 // to each model's original bodyY.
 const ANIMAL_REAL_HEIGHT = {
-  sheep: 0.8, dog: 0.58, cow: 1.4, giraffe: 3.0, lion: 1.2, elephant: 3.3,
+  rabbit: 0.3, deer: 1.0, wolf: 0.8, bear: 1.0, moose: 2.1,
 };
-// How much Meat killing each animal drops, non-decreasing with its real size above (dog/sheep are the
-// smallest, elephant the biggest) — not a strict formula, just hand-picked round numbers in the same
+// How much Meat killing each animal drops, non-decreasing with its real size above (rabbit is the
+// smallest, moose the biggest) — not a strict formula, just hand-picked round numbers in the same
 // order. Birds/fish scale by size too: large flying/aquatic species (eagle, swan, tuna) drop 2.
-const MEAT_YIELD = { dog:1, sheep:1, lion:2, cow:2, giraffe:3, elephant:4,
+const MEAT_YIELD = { rabbit:1, deer:2, wolf:2, bear:3, moose:5,
   robin:1, sparrow:1, blue_jay:1, cardinal:1, crow:2, bluebird:1, finch:1, swallow:1, dove:1, woodpecker:1, owl:2, hawk:2, eagle:2, parrot:1, toucan:1, flamingo:2, hummingbird:1, kingfisher:1, heron:2, pelican:2, seagull:1, magpie:1, raven:2, wren:1, chickadee:1, oriole:1, warbler:1, swan:2, duck:1, goose:2,
   goldfish:1, bass:1, salmon:1, tuna:2, clownfish:1, catfish:1, shark:3, whaleshark:5,
   worm:1, gopher:2, bigeagle:3,
@@ -165,7 +168,7 @@ const MEAT_YIELD = { dog:1, sheep:1, lion:2, cow:2, giraffe:3, elephant:4,
 };
 // Rough horizontal collision radius per species, used for entity-vs-entity collision below.
 const ANIMAL_RADIUS = {
-  sheep: 0.35, dog: 0.22, cow: 0.5, giraffe: 0.5, lion: 0.4, elephant: 0.95,
+  rabbit: 0.18, deer: 0.4, wolf: 0.3, bear: 0.55, moose: 0.75,
 };
 // Reproduction mechanics: animals reproduce when two of the same species meet.
 // Cooldown is set in real-time ms further below (ANIMAL_REPRODUCE_INTERVAL_MS), once
@@ -187,7 +190,7 @@ const BADGES = [
   { id:'hiking',     emoji:'🥾', name:'Hiking',       hint:'Hike 1,000 blocks on foot.',                   test:()=> scoutStats.hiked >= 1000 },
   { id:'swimming',   emoji:'🏊', name:'Swimming',     hint:'Swim 60 blocks.',                              test:()=> scoutStats.swam >= 60 },
   { id:'climbing',   emoji:'🧗', name:'Climbing',     hint:'Get 18 blocks above sea level.',               test:()=> scoutStats.highest >= 18 },
-  { id:'nature',     emoji:'🐘', name:'Nature Study', hint:'Study all 6 animals up close — lions and elephants included.', test:()=> scoutStats.species.length >= ANIMAL_TYPES.length },
+  { id:'nature',     emoji:'🦌', name:'Nature Study', hint:'Study all 5 animals up close — the bear and moose included.', test:()=> scoutStats.species.length >= ANIMAL_TYPES.length },
   { id:'nightwatch', emoji:'🦉', name:'Night Watch',  hint:'Spend 5 minutes outdoors after dark.',         test:()=> scoutStats.nightSeconds >= 300 },
   { id:'firstaid',   emoji:'⛑️',          name:'First Aid',    hint:'Heal back to full health after nearly dying.', test:()=> scoutStats.recoveries >= 1 },
   { id:'troopflag',  emoji:'🚩', name:'Troop Flag',   hint:'Raise your troop flag at camp.',               test:()=> scoutStats.flags >= 1 },
@@ -515,6 +518,7 @@ const RECIPES = [
   { name:'Lantern',        out:{id:LANTERN, qty:1},         in:[{id:STICK, qty:1}, {id:FLINT, qty:1}, {id:WINDOW, qty:1}] },
   { name:'Compass',        out:{id:COMPASS, qty:1},         in:[{id:FLINT, qty:1}, {id:STONE, qty:2}] },
   { name:'Troop Flag',     out:{id:FLAG, qty:1},            in:[{id:PLANKS, qty:2}, {id:STICK, qty:2}, {id:ROPE, qty:1}] },
+  { name:'Backpack',       out:{id:BACKPACK, qty:1},        in:[{id:PLANKS, qty:2}, {id:ROPE, qty:2}] },
 ];
 const inventory = {};
 // Fireworks are unlimited — no recipe, never consumed, always available regardless of what's saved.
@@ -543,6 +547,18 @@ function nearestCraftingTable(maxDist){
   return false;
 }
 
+// Every placed TENT cell, kept in sync by applyWorldEdit/loadEdits exactly like craftingTables above
+// — lets nearestTent (used by the Sleep key) check "am I near my tent" without scanning the world.
+const tentCells = new Set();
+function nearestTent(maxDist){
+  for(const k of tentCells){
+    const [x,y,z] = k.split(',').map(Number);
+    const dx = (x+0.5)-player.pos.x, dy = (y+0.5)-(player.pos.y+player.eye), dz = (z+0.5)-player.pos.z;
+    if(Math.hypot(dx,dy,dz) <= maxDist) return true;
+  }
+  return false;
+}
+
 // ---------- Texture atlas (procedurally drawn pixel-art, no external image assets) ----------
 // TILE=32 (was 16) gives 4x the pixel budget per block face — enough room for real structure
 // (cracks, grain, brick-by-brick variation, ripples) rather than flat color + noise.
@@ -551,7 +567,7 @@ const T_GRASS_TOP=0, T_GRASS_SIDE=1, T_DIRT=2, T_STONE=3, T_SAND=4, T_LOG_SIDE=5
       T_LEAVES=7, T_PLANKS=8, T_BEDROCK=9, T_CRAFT_TOP=10, T_CRAFT_SIDE=11, T_BRICKS=12, T_WATER=13,
       T_WINDOW=14, T_WINDOW_OPEN=15, T_DOOR=16, T_DOOR_OPEN=17, T_SAPLING=18, T_FLINT=19, T_FIRE=20,
       T_TORCH=21, T_LADDER=22, T_LEAVES_SPARSE=23, T_LEAVES_DENSE=24,
-      T_TENT=25, T_CAMPFIRE=26, T_LANTERN=27, T_FLAG=28;
+      T_TENT=25, T_CAMPFIRE=26, T_LANTERN=27, T_FLAG=28, T_BACKPACK=29;
 
 function hexRGB(hex){ return [(hex>>16)&255, (hex>>8)&255, hex&255]; }
 function rgbStr(r,g,b){ return `rgb(${r|0},${g|0},${b|0})`; }
@@ -1015,6 +1031,22 @@ function drawFlag(ctx,x0,y0){
   ctx.fillRect(x0+TILE*0.45,y0+TILE*0.22,2,TILE*0.16);
   ctx.fillRect(x0+TILE*0.4,y0+TILE*0.3,TILE*0.16,2);
 }
+function drawBackpack(ctx,x0,y0){
+  // A canvas rucksack seen from the front: rounded body, a flap, a front pocket, and two straps.
+  fillTile(ctx,x0,y0,0x5a3a20);
+  speckle(ctx,x0,y0,0x5a3a20,Math.round(TILE*TILE*0.1),8);
+  ctx.fillStyle = shadeStr(0x6b4a2f,1,8);
+  ctx.fillRect(x0+TILE*0.16,y0+TILE*0.22,TILE*0.68,TILE*0.68);
+  ctx.fillStyle = shadeStr(0x4a3018,1,8);
+  ctx.fillRect(x0+TILE*0.14,y0+TILE*0.14,TILE*0.72,TILE*0.22);
+  ctx.fillStyle = shadeStr(0x7a5a38,1,8);
+  ctx.fillRect(x0+TILE*0.28,y0+TILE*0.5,TILE*0.44,TILE*0.32);
+  ctx.fillStyle = shadeStr(0xc8a366,1,6);
+  ctx.fillRect(x0+TILE*0.44,y0+TILE*0.58,TILE*0.12,TILE*0.08);
+  ctx.fillStyle = shadeStr(0x3a2412,1,6);
+  ctx.fillRect(x0+TILE*0.2,y0,TILE*0.1,TILE*0.22);
+  ctx.fillRect(x0+TILE*0.7,y0,TILE*0.1,TILE*0.22);
+}
 function buildAtlas(){
   const canvas = document.createElement('canvas');
   canvas.width = TILE*ATLAS_COLS;
@@ -1024,7 +1056,7 @@ function buildAtlas(){
                 drawLeaves, drawPlanks, drawBedrock, drawCraftTop, drawCraftSide, drawBricks, drawWater,
                 drawWindow, drawWindowOpen, drawDoor, drawDoorOpen, drawSapling, drawFlint, drawFire, drawTorch,
                 drawLadder, drawLeavesSparse, drawLeavesDense,
-                drawTent, drawCampfire, drawLantern, drawFlag];
+                drawTent, drawCampfire, drawLantern, drawFlag, drawBackpack];
   draw.forEach((fn, i)=> fn(ctx, (i%ATLAS_COLS)*TILE, Math.floor(i/ATLAS_COLS)*TILE));
   const tex = new THREE.CanvasTexture(canvas);
   tex.magFilter = THREE.NearestFilter;
@@ -1066,6 +1098,7 @@ const BLOCK_TILES = {
   [CAMPFIRE]: {top:T_CAMPFIRE, side:T_CAMPFIRE, bottom:T_DIRT},
   [LANTERN]: {top:T_LANTERN, side:T_LANTERN, bottom:T_LANTERN},
   [FLAG]: {top:T_FLAG, side:T_FLAG, bottom:T_FLAG},
+  [BACKPACK]: {top:T_BACKPACK, side:T_BACKPACK, bottom:T_PLANKS},
 };
 // per-face-direction UV winding (0/1 flags select u0/u1 and vBottom/vTop), aligned to FACES order below
 const UV_PATTERNS = [
@@ -1273,6 +1306,8 @@ function loadEdits(){
       edits.set(k, obj[k]);
       if(obj[k]===CRAFTING_TABLE) craftingTables.add(k);
       else craftingTables.delete(k);
+      if(obj[k]===TENT) tentCells.add(k);
+      else tentCells.delete(k);
     }
     document.getElementById('blockCount').textContent = edits.size;
   }catch(e){}
@@ -1829,60 +1864,37 @@ function buildHideTexture(drawFn){
   return tex;
 }
 const ANIMAL_HIDE = {
-  cow: buildHideTexture((ctx,size)=>{
-    fillTileSized(ctx,size,0xe8e4d8);
-    speckleSized(ctx,size,0xe8e4d8,50,8);
-    ctx.fillStyle = 'rgb(35,35,35)';
-    blobPatch(ctx, 2, 3, 14, 12);
-    blobPatch(ctx, 16, 15, 14, 14);
-  }),
-  sheep: buildHideTexture((ctx,size)=>{
-    fillTileSized(ctx,size,0xebe6d6);
-    for(let i=0;i<28;i++){
-      const x=Math.random()*size, y=Math.random()*size, r=1.4+Math.random()*1.6;
-      ctx.fillStyle = shadeStr(0xebe6d6, 0.8+Math.random()*0.35, 6);
+  rabbit: buildHideTexture((ctx,size)=>{
+    fillTileSized(ctx,size,0xcfc0a6);
+    for(let i=0;i<22;i++){
+      const x=Math.random()*size, y=Math.random()*size, r=1.2+Math.random()*1.4;
+      ctx.fillStyle = shadeStr(0xcfc0a6, 0.8+Math.random()*0.35, 6);
       ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.fill();
     }
   }),
-  dog: buildHideTexture((ctx,size)=>{
-    fillTileSized(ctx,size,0x8a5a34);
-    speckleSized(ctx,size,0x8a5a34,70,12);
+  deer: buildHideTexture((ctx,size)=>{
+    fillTileSized(ctx,size,0xa9713f);
+    speckleSized(ctx,size,0xa9713f,45,10);
+  }),
+  wolf: buildHideTexture((ctx,size)=>{
+    fillTileSized(ctx,size,0x777d82);
+    speckleSized(ctx,size,0x777d82,60,10);
     for(let x=0;x<size;x+=2){
       if(Math.random()<0.5){
-        ctx.fillStyle = shadeStr(0x8a5a34, 0.65+Math.random()*0.3, 6);
+        ctx.fillStyle = shadeStr(0x777d82, 0.6+Math.random()*0.3, 6);
         ctx.fillRect(x, Math.random()*size*0.5, 1, size*0.35+Math.random()*size*0.3);
       }
     }
   }),
-  giraffe: buildHideTexture((ctx,size)=>{
-    fillTileSized(ctx,size,0xd8b26a);
-    speckleSized(ctx,size,0xd8b26a,20,6);
-    ctx.fillStyle = 'rgb(139,90,43)';
-    for(let i=0;i<9;i++){
-      const x=Math.random()*size, y=Math.random()*size, r=size*0.1+Math.random()*size*0.07;
-      const pts = 6+Math.floor(Math.random()*3);
-      ctx.beginPath();
-      for(let p=0;p<=pts;p++){
-        const ang=(p/pts)*Math.PI*2, rr=r*(0.7+Math.random()*0.5);
-        const px=x+Math.cos(ang)*rr, py=y+Math.sin(ang)*rr;
-        p===0 ? ctx.moveTo(px,py) : ctx.lineTo(px,py);
-      }
-      ctx.closePath(); ctx.fill();
-    }
+  bear: buildHideTexture((ctx,size)=>{
+    fillTileSized(ctx,size,0x2b211a);
+    speckleSized(ctx,size,0x2b211a,50,8);
   }),
-  lion: buildHideTexture((ctx,size)=>{
-    fillTileSized(ctx,size,0xc99a4e);
-    speckleSized(ctx,size,0xc99a4e,60,10);
-  }),
-  elephant: buildHideTexture((ctx,size)=>{
-    fillTileSized(ctx,size,0x9a9a9a);
-    for(let i=0;i<55;i++){
-      const x=Math.floor(Math.random()*size), y=Math.floor(Math.random()*size);
-      ctx.fillStyle = shadeStr(0x9a9a9a, 0.75+Math.random()*0.35, 8);
-      ctx.fillRect(x,y, 1+Math.floor(Math.random()*2), 1+Math.floor(Math.random()*2));
-    }
-    ctx.strokeStyle = 'rgba(60,60,60,0.2)';
-    for(let i=0;i<5;i++){
+  moose: buildHideTexture((ctx,size)=>{
+    fillTileSized(ctx,size,0x4a3524);
+    speckleSized(ctx,size,0x4a3524,40,8);
+    ctx.strokeStyle = 'rgba(20,15,10,0.25)';
+    for(let i=0;i<4;i++){
       const y = Math.random()*size;
       ctx.beginPath();
       ctx.moveTo(0,y);
@@ -1927,92 +1939,90 @@ function makeQuadruped(opts){
   return g;
 }
 const ANIMAL_BUILDERS = {
-  cow(){
-    const hide = ANIMAL_HIDE_MAT.cow;
+  rabbit(){
+    const hide = ANIMAL_HIDE_MAT.rabbit;
     return makeQuadruped({
-      bodyW:1.0, bodyH:0.65, bodyD:0.5, bodyY:0.75, bodyMat:hide,
-      legW:0.14,
-      headW:0.32, headH:0.32, headD:0.3, headY:0.85, headZ:-0.5,
+      bodyW:0.34, bodyH:0.24, bodyD:0.3, bodyY:0.22, bodyMat:hide,
+      legW:0.06,
+      headW:0.18, headH:0.18, headD:0.18, headY:0.32, headZ:-0.16,
       extras(g){
-        const snout=animalBox(0.2,0.14,0.12,0xd9a0a0); snout.position.set(0,0.78,-0.67); g.add(snout);
-        const earL=animalBox(0.12,0.05,0.05,hide); earL.position.set(-0.2,0.95,-0.46); g.add(earL);
-        const earR=animalBox(0.12,0.05,0.05,hide); earR.position.set(0.2,0.95,-0.46); g.add(earR);
+        const earL=animalBox(0.05,0.22,0.04,hide); earL.position.set(-0.05,0.5,-0.14); earL.rotation.x=-0.15; g.add(earL);
+        const earR=animalBox(0.05,0.22,0.04,hide); earR.position.set(0.05,0.5,-0.14); earR.rotation.x=-0.15; g.add(earR);
+        const tail=animalBox(0.08,0.08,0.08,0xffffff); tail.position.set(0,0.26,0.16); g.add(tail);
       },
     });
   },
-  sheep(){
-    const hide = ANIMAL_HIDE_MAT.sheep;
+  deer(){
+    const hide = ANIMAL_HIDE_MAT.deer;
     return makeQuadruped({
-      bodyW:0.7, bodyH:0.55, bodyD:0.45, bodyY:0.5, bodyMat:hide,
-      legW:0.1, legMat:0x3a3a3a,
-      headW:0.24, headH:0.22, headD:0.22, headMat:0x3a3a3a, headY:0.55, headZ:-0.38,
+      bodyW:0.55, bodyH:0.45, bodyD:0.85, bodyY:0.85, bodyMat:hide,
+      legW:0.09,
+      headW:0.22, headH:0.24, headD:0.3, headY:1.05, headZ:-0.55,
       extras(g){
-        const earL=animalBox(0.1,0.05,0.05,0x3a3a3a); earL.position.set(-0.14,0.58,-0.32); g.add(earL);
-        const earR=animalBox(0.1,0.05,0.05,0x3a3a3a); earR.position.set(0.14,0.58,-0.32); g.add(earR);
+        const earL=animalBox(0.05,0.14,0.1,hide); earL.position.set(-0.13,1.18,-0.5); earL.rotation.z=0.4; g.add(earL);
+        const earR=animalBox(0.05,0.14,0.1,hide); earR.position.set(0.13,1.18,-0.5); earR.rotation.z=-0.4; g.add(earR);
+        const tail=animalBox(0.08,0.1,0.08,0xffffff); tail.position.set(0,0.9,0.42); g.add(tail);
+        // Antlers: a short main beam per side with one forward tine — deliberately blocky, like everything else here.
+        const beamL=animalBox(0.04,0.32,0.04,0x8a6a44); beamL.position.set(-0.1,1.34,-0.55); beamL.rotation.z=0.35; g.add(beamL);
+        const beamR=animalBox(0.04,0.32,0.04,0x8a6a44); beamR.position.set(0.1,1.34,-0.55); beamR.rotation.z=-0.35; g.add(beamR);
+        const tineL=animalBox(0.04,0.16,0.04,0x8a6a44); tineL.position.set(-0.2,1.48,-0.48); tineL.rotation.z=-0.5; g.add(tineL);
+        const tineR=animalBox(0.04,0.16,0.04,0x8a6a44); tineR.position.set(0.2,1.48,-0.48); tineR.rotation.z=0.5; g.add(tineR);
       },
     });
   },
-  dog(){
-    const hide = ANIMAL_HIDE_MAT.dog;
+  wolf(){
+    const hide = ANIMAL_HIDE_MAT.wolf;
     return makeQuadruped({
-      bodyW:0.5, bodyH:0.3, bodyD:0.26, bodyY:0.4, bodyMat:hide,
+      bodyW:0.5, bodyH:0.32, bodyD:0.62, bodyY:0.42, bodyMat:hide,
       legW:0.08,
-      headW:0.22, headH:0.2, headD:0.22, headY:0.48, headZ:-0.3,
+      headW:0.22, headH:0.2, headD:0.26, headY:0.5, headZ:-0.36,
       extras(g){
-        const earL=animalBox(0.06,0.14,0.1,0x5a3a20); earL.position.set(-0.12,0.56,-0.32); g.add(earL);
-        const earR=animalBox(0.06,0.14,0.1,0x5a3a20); earR.position.set(0.12,0.56,-0.32); g.add(earR);
-        const tail=animalBox(0.06,0.06,0.26,hide); tail.position.set(0,0.48,0.26); tail.rotation.x=0.5; g.add(tail);
+        const earL=animalBox(0.07,0.12,0.06,hide); earL.position.set(-0.09,0.66,-0.34); g.add(earL);
+        const earR=animalBox(0.07,0.12,0.06,hide); earR.position.set(0.09,0.66,-0.34); g.add(earR);
+        const snout=animalBox(0.1,0.08,0.14,0x2c2c2c); snout.position.set(0,0.46,-0.5); g.add(snout);
+        const tail=animalBox(0.08,0.08,0.34,hide); tail.position.set(0,0.5,0.36); tail.rotation.x=0.35; g.add(tail);
       },
     });
   },
-  giraffe(){
-    const hide = ANIMAL_HIDE_MAT.giraffe;
+  bear(){
+    const hide = ANIMAL_HIDE_MAT.bear;
     return makeQuadruped({
-      bodyW:0.6, bodyH:0.55, bodyD:0.4, bodyY:1.5, bodyMat:hide,
-      legW:0.13,
-      headW:0.22, headH:0.28, headD:0.26, headY:2.55, headZ:-0.4,
+      bodyW:0.8, bodyH:0.62, bodyD:0.55, bodyY:0.55, bodyMat:hide,
+      legW:0.16,
+      headW:0.3, headH:0.28, headD:0.3, headY:0.62, headZ:-0.46,
       extras(g){
-        const neck=animalBox(0.22,1.15,0.22,hide);
-        neck.position.set(0,1.98,-0.32); neck.rotation.x=-0.18; g.add(neck);
-        const hornL=animalBox(0.05,0.14,0.05,0x8a6a3a); hornL.position.set(-0.08,2.78,-0.42); g.add(hornL);
-        const hornR=animalBox(0.05,0.14,0.05,0x8a6a3a); hornR.position.set(0.08,2.78,-0.42); g.add(hornR);
+        const earL=animalBox(0.08,0.08,0.05,hide); earL.position.set(-0.11,0.8,-0.42); g.add(earL);
+        const earR=animalBox(0.08,0.08,0.05,hide); earR.position.set(0.11,0.8,-0.42); g.add(earR);
+        const snout=animalBox(0.16,0.12,0.14,0x3a2c22); snout.position.set(0,0.56,-0.62); g.add(snout);
+        const hump=animalBox(0.5,0.2,0.3,hide); hump.position.set(0,0.86,0.05); g.add(hump);
+        const tail=animalBox(0.08,0.08,0.06,hide); tail.position.set(0,0.5,0.3); g.add(tail);
       },
     });
   },
-  lion(){
-    const hide = ANIMAL_HIDE_MAT.lion;
+  moose(){
+    const hide = ANIMAL_HIDE_MAT.moose;
     return makeQuadruped({
-      bodyW:0.85, bodyH:0.55, bodyD:0.5, bodyY:0.65, bodyMat:hide,
-      legW:0.14,
-      headW:0.32, headH:0.3, headD:0.28, headY:0.8, headZ:-0.5,
+      bodyW:0.75, bodyH:0.65, bodyD:0.55, bodyY:1.6, bodyMat:hide,
+      legW:0.2,
+      headW:0.3, headH:0.34, headD:0.5, headY:2.15, headZ:-0.5,
       extras(g){
-        const mane=animalBox(0.46,0.46,0.4,0x8a5a28); mane.position.set(0,0.8,-0.44); g.add(mane);
-        const head2=animalBox(0.32,0.3,0.28,hide); head2.position.set(0,0.8,-0.58); g.add(head2);
-        const tail=animalBox(0.06,0.06,0.4,hide); tail.position.set(0,0.65,0.5); tail.rotation.x=0.3; g.add(tail);
-        const tuft=animalBox(0.1,0.1,0.1,0x5a3a1a); tuft.position.set(0,0.5,0.68); g.add(tuft);
-      },
-    });
-  },
-  elephant(){
-    const hide = ANIMAL_HIDE_MAT.elephant;
-    return makeQuadruped({
-      bodyW:1.3, bodyH:0.9, bodyD:0.7, bodyY:1.0, bodyMat:hide,
-      legW:0.24,
-      headW:0.5, headH:0.5, headD:0.4, headY:1.15, headZ:-0.65,
-      extras(g){
-        const earL=animalBox(0.06,0.4,0.4,hide); earL.position.set(-0.28,1.2,-0.55); g.add(earL);
-        const earR=animalBox(0.06,0.4,0.4,hide); earR.position.set(0.28,1.2,-0.55); g.add(earR);
-        const trunk=animalBox(0.14,0.85,0.14,hide);
-        trunk.geometry.translate(0,-0.425,0); trunk.position.set(0,1.3,-0.85); trunk.rotation.x=0.25; g.add(trunk);
-        const tuskL=animalBox(0.05,0.05,0.22,0xf0ead6); tuskL.position.set(-0.12,0.95,-0.9); g.add(tuskL);
-        const tuskR=animalBox(0.05,0.05,0.22,0xf0ead6); tuskR.position.set(0.12,0.95,-0.9); g.add(tuskR);
+        const hump=animalBox(0.5,0.25,0.3,hide); hump.position.set(0,2.0,0.05); g.add(hump);
+        const muzzle=animalBox(0.24,0.2,0.3,hide); muzzle.position.set(0,2.02,-0.75); g.add(muzzle);
+        const dewlap=animalBox(0.08,0.22,0.08,hide); dewlap.position.set(0,1.9,-0.55); g.add(dewlap);
+        const earL=animalBox(0.06,0.16,0.12,hide); earL.position.set(-0.17,2.28,-0.42); g.add(earL);
+        const earR=animalBox(0.06,0.16,0.12,hide); earR.position.set(0.17,2.28,-0.42); g.add(earR);
+        // Paddle antlers: a short beam flaring into a wide flat palm on each side.
+        const beamL=animalBox(0.05,0.05,0.3,0x5a4530); beamL.position.set(-0.12,2.5,-0.5); beamL.rotation.y=0.5; g.add(beamL);
+        const beamR=animalBox(0.05,0.05,0.3,0x5a4530); beamR.position.set(0.12,2.5,-0.5); beamR.rotation.y=-0.5; g.add(beamR);
+        const palmL=animalBox(0.35,0.05,0.28,0x5a4530); palmL.position.set(-0.32,2.55,-0.62); palmL.rotation.y=0.5; g.add(palmL);
+        const palmR=animalBox(0.35,0.05,0.28,0x5a4530); palmR.position.set(0.32,2.55,-0.62); palmR.rotation.y=-0.5; g.add(palmR);
       },
     });
   },
 };
 // Original bodyY (quadrupeds) / hip height (bipeds) each model was designed at, before rescaling.
 const ANIMAL_ORIGINAL_BODY_Y = {
-  cow:0.75, sheep:0.5, dog:0.4, giraffe:1.5, lion:0.65, elephant:1.0,
+  rabbit:0.22, deer:0.85, wolf:0.42, bear:0.55, moose:1.6,
 };
 const ANIMAL_SCALE = {};
 for(const type of ANIMAL_TYPES) ANIMAL_SCALE[type] = ANIMAL_REAL_HEIGHT[type] / ANIMAL_ORIGINAL_BODY_Y[type];
@@ -2043,7 +2053,7 @@ function groundHeightAt(x,z){
   }
   return 1;
 }
-const SPAWN_COUNTS = { cow:16, sheep:20, dog:12, giraffe:12, lion:8, elephant:8 }; // 4x the original counts
+const SPAWN_COUNTS = { deer:5, bear:1, wolf:2, rabbit:10, moose:1 };
 function findSpawnSpot(seedX, seedZ){
   let x,z,h,tries=0;
   do{
@@ -2112,7 +2122,7 @@ function updateAnimal(a, dt){
 
   if(stats.aggressive && distToPlayer < AGGRO_RADIUS) a.aggroUntil = Math.max(a.aggroUntil, now + 1500);
   const isAggro = now < a.aggroUntil && distToPlayer < DEAGGRO_RADIUS;
-  if(isAggro && !a.wasAggro && a.type==='lion') SFX.roar();
+  if(isAggro && !a.wasAggro && a.type==='bear') SFX.roar();
   a.wasAggro = isAggro;
 
   let moving = false;
@@ -2477,6 +2487,11 @@ const SFX = {
     });
   },
   roar(){ playRoar(); },
+  // Waking up: two soft rising tones, the opposite shape of death's falling one.
+  sleep(){
+    playTone(320, 0.35, 'sine', 0.1, 420, 0.06);
+    setTimeout(()=>playTone(440, 0.4, 'sine', 0.1, 560, 0.06), 220);
+  },
   doorToggle(opening){ playDoorCreak(opening); },
   windowToggle(opening){ playWindowSlide(opening); },
   // A soft attack rounds the transient off into a light "patter" instead of a percussive tap, and
@@ -2502,11 +2517,6 @@ const SFX = {
     for(let i=0;i<6;i++){
       setTimeout(()=>playNoise(0.05+Math.random()*0.05, 0.09, 2800+Math.random()*3400, 0.002), 50+i*65+Math.random()*40);
     }
-  },
-  // Two overlapping soft descending tones for a gentle, cartoonish "woo-ooh" — spooky but harmless.
-  ghostBoo(){
-    playTone(300, 0.5, 'sine', 0.12, 180, 0.05);
-    setTimeout(()=>playTone(240, 0.4, 'sine', 0.08, 140, 0.05), 150);
   },
   // A short 2-3 note chirp; pitchMul shifts the whole thing up/down per species (small birds read
   // higher, large ones lower) and volume is computed by the caller from distance to the listener,
@@ -2617,6 +2627,32 @@ function respawnAfterDeath(){
   updateHungerUI();
   if(fbReady) db.ref(DB_ROOT+'players/'+myId+'/hp').set(myHP);
 }
+// ---------- Sleep ----------
+// Sleeping through the night is purely local, the same way forcing Day/Night with N already is (see
+// setTimeMode) — the shared world clock is everyone's real wall-clock time, so one player turning in
+// early can't skip the night for anyone else without desyncing it. What it actually gets you: a full
+// rest (HP and hunger both topped up) and your own view jumps straight to morning.
+let sleeping = false;
+function trySleep(){
+  if(sleeping || craftingOpen || itemsOpen || sashOpen || chatOpen) return;
+  if(!nearestTent(4)){ addChatMessage('Camp', '⛺ You need to be near your tent to sleep.'); return; }
+  if(!isScoutNight()){ addChatMessage('Camp', "☀️ You're not sleepy yet — try again after dark."); return; }
+  sleeping = true;
+  const el = document.getElementById('sleepOverlay');
+  if(el){ el.style.transition = 'none'; el.style.opacity = '1'; }
+  setTimeout(()=>{
+    setTimeMode('day');
+    myHP = PLAYER_MAX_HP;
+    updateHeartsUI();
+    myHunger = PLAYER_MAX_HUNGER;
+    updateHungerUI();
+    if(fbReady) db.ref(DB_ROOT+'players/'+myId+'/hp').set(myHP);
+    SFX.sleep();
+    addChatMessage('Camp', '💤 You wake up at camp, well rested.');
+    if(el) requestAnimationFrame(()=>{ el.style.transition = 'opacity 1.2s ease-in'; el.style.opacity = '0'; });
+    sleeping = false;
+  }, 900);
+}
 function updateDeathState(dt){
   if(!isDead) return;
   respawnTimer -= dt;
@@ -2629,7 +2665,7 @@ function findAttackTarget(){
   const origin = camera.position;
   let best = null, bestDist = Infinity;
   animals.forEach(a=>{
-    // Bigger animals (elephant, T-Rex...) need a longer reach so the player can hit their
+    // Bigger animals (moose, bear...) need a longer reach so the player can hit their
     // visible body, not just the exact ground point their position is tracked from.
     const aimY = ANIMAL_REAL_HEIGHT[a.type] || 0.4;
     const range = ATTACK_RANGE + (ANIMAL_STATS[a.type].reach||0);
@@ -2780,6 +2816,7 @@ function applyWorldEdit(x,y,z,val,fromRemote){
   const k = x+','+y+','+z;
   edits.set(k, val);
   if(val===CRAFTING_TABLE) craftingTables.add(k); else craftingTables.delete(k);
+  if(val===TENT) tentCells.add(k); else tentCells.delete(k);
   updateTorchLight(x,y,z,val);
   onBlockChanged(x,y,z);
   onWaterRelevantEdit(x,y,z,val);
@@ -2936,7 +2973,7 @@ function lerpColorHex(a,b,t){
 }
 // 'regular' (the normal wall-clock cycle), 'day' (frozen at noon), or 'night' (frozen at midnight) —
 // toggled with N (see the keydown handler). Every consumer of currentDayTime() — sky/lighting, the
-// sun/moon, the temperature swing, firefly/ghost night visibility, and the HH:MM World Time HUD label
+// sun/moon, the temperature swing, firefly night visibility, and the HH:MM World Time HUD label
 // — reads it through this one function, so forcing it here is enough to make all of them agree.
 let timeMode = 'regular';
 function currentDayTime(){
@@ -2944,10 +2981,13 @@ function currentDayTime(){
   if(timeMode==='night') return 0;
   return (Date.now()/1000 % DAY_LENGTH_S) / DAY_LENGTH_S;
 }
-function cycleTimeMode(){
-  timeMode = timeMode==='regular' ? 'day' : timeMode==='day' ? 'night' : 'regular';
+function setTimeMode(mode){
+  timeMode = mode;
   const el = document.getElementById('timeModeLabel');
   if(el) el.textContent = timeMode==='day' ? ' ☀️ forced day' : timeMode==='night' ? ' 🌙 forced night' : '';
+}
+function cycleTimeMode(){
+  setTimeMode(timeMode==='regular' ? 'day' : timeMode==='day' ? 'night' : 'regular');
 }
 
 // ---------- Calendar: Year/Month/Day, anchored to a specific real-world instant ----------
@@ -3521,7 +3561,7 @@ function updateFireflies(dt){
 // already uses for animals/players. Once a worm has personally eaten WORM_BUTTERFLY_THRESHOLD leaves
 // over its lifetime, it metamorphoses into a butterfly right where it's standing (see the Butterflies
 // section below) instead of continuing to eat/reproduce as a worm.
-// Unlike fireflies/the ghost, worms themselves ARE synced — under 'world/worms/<id>' — precisely so
+// Unlike fireflies, worms themselves ARE synced — under 'world/worms/<id>' — precisely so
 // their eat/reproduce timers survive a reload: without persistence every page load reset every timer
 // to "now", so a single continuously-open tab was the only way either interval could ever actually
 // fire. Each worm's existence, position, both timestamps, and its running eaten-leaves count live in
@@ -3841,7 +3881,7 @@ function hashIdToSeed(id){
   for(let i=0;i<id.length;i++) h = (h*31 + id.charCodeAt(i)) >>> 0;
   return h;
 }
-// Per-pixel, not canvas arcs (the ghost's tail taught that lesson) — a symmetric two-lobe-per-side
+// Per-pixel, not canvas arcs — a symmetric two-lobe-per-side
 // silhouette (a bigger upper wing, a smaller lower wing) with a dark body line down the middle, plus
 // scattered dark "vein" speckles and lighter accent-hue spots so each butterfly reads as genuinely
 // colorful rather than a single flat tint.
@@ -4010,122 +4050,6 @@ function updateButterflies(dt){
   }
 }
 
-// ---------- Ghost: a single harmless Casper who floats around at night ----------
-// Solid-block collision simply never applies to it — its position is set directly every frame with
-// no blockSolid/collidesBox check anywhere, so it drifts straight through walls, trees, hills,
-// anything. It hovers a fixed 1 block above whatever ground is directly below it (recomputed each
-// frame via groundHeightAt, the same helper animals use to find footing), fades in with the same
-// night-only visibility fireflies already use, and is otherwise a lazy wanderer recycled near the
-// player — except every so often (GHOST_SURPRISE_*) it breaks off to drift in close behind the
-// player for a few seconds with a soft "boo", then wanders off again. Purely decorative: it never
-// deals damage or reacts to being hit, and — like fireflies/worms — it's a local-only flourish, not
-// synced across clients.
-const GHOST_WANDER_RADIUS = 22;
-const GHOST_SURPRISE_MIN_S = 30, GHOST_SURPRISE_MAX_S = 90;
-const GHOST_SURPRISE_DURATION_S = 3;
-const GHOST_APPROACH_SPEED = 4; // units/s while closing in during a "surprise"
-let ghostTexture = null, ghost = null;
-// Built per-pixel (a boundary test per row/column) rather than with canvas path/arc calls, so the
-// scalloped tail is an unambiguous sine-wave edge instead of relying on overlapping erased circles.
-function buildGhostTexture(){
-  const W=48, H=64;
-  const canvas = document.createElement('canvas');
-  canvas.width=W; canvas.height=H;
-  const ctx = canvas.getContext('2d');
-  const cx0=W/2, domeCy=H*0.30, domeR=W*0.42;
-  const leftX=W*0.08, rightX=W*0.92;
-  const straightBottom=H*0.74, tailBottom=H*0.92, waves=4;
-  ctx.fillStyle = 'rgba(255,255,255,0.92)';
-  for(let y=0;y<H;y++){
-    for(let x=0;x<W;x++){
-      let inside;
-      if(y<domeCy){
-        const dx=x-cx0, dy=y-domeCy;
-        inside = (dx*dx+dy*dy) <= domeR*domeR;
-      } else if(y<straightBottom){
-        inside = x>=leftX && x<=rightX;
-      } else {
-        const xf = (x-leftX)/(rightX-leftX);
-        const wave = Math.sin(xf*waves*Math.PI*2)*0.5+0.5;
-        const localBottom = straightBottom + (tailBottom-straightBottom)*wave;
-        inside = x>=leftX && x<=rightX && y<=localBottom;
-      }
-      if(inside) ctx.fillRect(x,y,1,1);
-    }
-  }
-  ctx.fillStyle = 'rgba(25,25,40,0.85)';
-  ctx.beginPath(); ctx.ellipse(W*0.37,domeCy,W*0.065,H*0.075,0,0,Math.PI*2); ctx.fill();
-  ctx.beginPath(); ctx.ellipse(W*0.63,domeCy,W*0.065,H*0.075,0,0,Math.PI*2); ctx.fill();
-  return new THREE.CanvasTexture(canvas);
-}
-function ensureGhost(){
-  if(ghost) return;
-  if(!ghostTexture) ghostTexture = buildGhostTexture();
-  const mat = new THREE.SpriteMaterial({ map:ghostTexture, transparent:true, opacity:0, depthWrite:false });
-  const sprite = new THREE.Sprite(mat);
-  sprite.scale.set(1.1, 1.5, 1);
-  scene.add(sprite);
-  const light = new THREE.PointLight(0xcfe8ff, 0, 6, 2);
-  scene.add(light);
-  ghost = {
-    sprite, light,
-    x: player.pos.x, y: player.pos.y+1, z: player.pos.z, baseY: player.pos.y+1,
-    homeX: player.pos.x, homeZ: player.pos.z,
-    freqX: 0.15+Math.random()*0.1, freqZ: 0.13+Math.random()*0.1, freqY: 0.25+Math.random()*0.15,
-    ampXZ: 3+Math.random()*2, ampY: 0.4, phase: Math.random()*Math.PI*2,
-    state: 'wander',
-    surpriseTimer: GHOST_SURPRISE_MIN_S + Math.random()*(GHOST_SURPRISE_MAX_S-GHOST_SURPRISE_MIN_S),
-    surpriseElapsed: 0, targetX: 0, targetZ: 0,
-  };
-}
-function updateGhost(dt){
-  ensureGhost();
-  const g = ghost;
-  const night = fireflyNightFactor();
-  const t = performance.now()/1000;
-
-  if(g.state==='wander'){
-    const dx = g.homeX-player.pos.x, dz = g.homeZ-player.pos.z;
-    if(dx*dx+dz*dz > GHOST_WANDER_RADIUS*GHOST_WANDER_RADIUS){
-      const ang = Math.random()*Math.PI*2, r = 8+Math.random()*10;
-      g.homeX = player.pos.x + Math.cos(ang)*r;
-      g.homeZ = player.pos.z + Math.sin(ang)*r;
-    }
-    g.x = g.homeX + Math.sin(t*g.freqX+g.phase)*g.ampXZ;
-    g.z = g.homeZ + Math.cos(t*g.freqZ+g.phase*1.3)*g.ampXZ;
-    g.surpriseTimer -= dt;
-    if(g.surpriseTimer<=0 && night>0.5 && locked){
-      g.state = 'surprise';
-      g.surpriseElapsed = 0;
-      const ang = player.yaw + Math.PI + (Math.random()<0.5?0.5:-0.5); // roughly behind, left or right
-      const dist = 2.2+Math.random();
-      g.targetX = player.pos.x + Math.sin(ang)*dist;
-      g.targetZ = player.pos.z + Math.cos(ang)*dist;
-      SFX.ghostBoo();
-    }
-  } else { // surprise
-    g.surpriseElapsed += dt;
-    const step = GHOST_APPROACH_SPEED*dt;
-    const dx = g.targetX-g.x, dz = g.targetZ-g.z, d = Math.hypot(dx,dz);
-    if(d>step) { g.x += dx/d*step; g.z += dz/d*step; }
-    else { g.x = g.targetX; g.z = g.targetZ; }
-    if(g.surpriseElapsed >= GHOST_SURPRISE_DURATION_S){
-      g.state = 'wander';
-      g.homeX = g.x; g.homeZ = g.z;
-      g.surpriseTimer = GHOST_SURPRISE_MIN_S + Math.random()*(GHOST_SURPRISE_MAX_S-GHOST_SURPRISE_MIN_S);
-    }
-  }
-
-  const groundY = groundHeightAt(g.x, g.z);
-  const targetBaseY = groundY + 1;
-  g.baseY += (targetBaseY-g.baseY) * Math.min(1, dt*2);
-  g.y = g.baseY + Math.sin(t*g.freqY+g.phase*0.6)*g.ampY;
-  g.sprite.position.set(g.x, g.y, g.z);
-  g.light.position.copy(g.sprite.position);
-  g.sprite.material.opacity = night*0.85;
-  g.light.intensity = night*0.6;
-}
-
 // Shared by every ambient creature below (birds, fish, turtles, Giant Eagles) that recycles its "home"
 // point to a fresh spot near the player once the old one falls too far away, then glides there smoothly
 // over a short fixed window rather than teleporting. That's the right call for an ordinary recycle (a
@@ -4146,7 +4070,7 @@ function relocateTransitionTime(fromX, fromZ, toX, toZ, radius, baseTime){
 // ---------- Birds: 30 flyable species, ambient wildlife that circles nearby and occasionally tweets ----------
 // Modeled on the fireflies' "home point recycled near the player + closed-form sinusoidal drift"
 // approach rather than the ground animals' wander/aggro state machine — birds fly through open 3D
-// space, not along the ground, and like fireflies/the ghost they're a purely local, non-persistent
+// space, not along the ground, and like fireflies they're a purely local, non-persistent
 // decoration: nothing about them is saved or synced, so every client just sees its own equally-alive
 // sky. Two of each of the 30 species are aloft at any time. There's no true positional audio in this
 // game's synth-only sound system, so "hearing" a tweet is faked by only ever playing one for a bird
@@ -5788,6 +5712,19 @@ function breakBlock(){
     SFX.breakBlock();
     return;
   }
+  if(b===TENT){
+    // Breaking any one wall takes the whole shelter down and hands back a single Tent item, same as
+    // a door — the alternative (COLLECTIBLE's plain 1-for-1 map) would refund a full Tent for every
+    // one of its ~23 cells broken individually.
+    const cells = findTentCells(hit.x,hit.y,hit.z);
+    for(const c of cells) applyWorldEdit(c.x, c.y, c.z, AIR, false);
+    invAdd(TENT, 1);
+    saveInventory();
+    updateHotbarUI();
+    triggerSwing();
+    SFX.breakBlock();
+    return;
+  }
   applyWorldEdit(hit.x, hit.y, hit.z, AIR, false);
   if(COLLECTIBLE.has(b)){ invAdd(COLLECT_AS[b] || b, 1); saveInventory(); }
   if(b===WOOD) checkTreeSupport(hit.x, hit.y, hit.z);
@@ -5854,12 +5791,64 @@ function placeLadder(hit){
   triggerSwing();
   SFX.placeBlock();
 }
+// A tent is a whole walk-in shelter, not one cube: a 3-wide, 2-tall room one block deep, closed on
+// the back and sides, with a 1-wide doorway left open in the middle of the front wall so you can
+// actually step inside, capped with a flat roof. Oriented the same way placeDoor works out a door's
+// width axis — whichever of x/z you're more square-on to becomes the tent's depth, extending away
+// from you so the entrance ends up facing back the way you were standing when you placed it.
+function findTentCells(x,y,z){
+  // Flood fill rather than reconstructing the fixed shape geometrically (like findDoorCells does) —
+  // a tent has too many cells for that to stay simple, and a plain bounded flood fill handles any
+  // orientation for free. Capped well above one tent's 23 cells purely as a runaway-search guard.
+  const cells = [], seen = new Set(), stack = [{x,y,z}];
+  while(stack.length && cells.length<40){
+    const c = stack.pop();
+    const k = c.x+','+c.y+','+c.z;
+    if(seen.has(k)) continue;
+    seen.add(k);
+    if(getBlock(c.x,c.y,c.z)!==TENT) continue;
+    cells.push(c);
+    stack.push({x:c.x+1,y:c.y,z:c.z},{x:c.x-1,y:c.y,z:c.z},{x:c.x,y:c.y+1,z:c.z},
+               {x:c.x,y:c.y-1,z:c.z},{x:c.x,y:c.y,z:c.z+1},{x:c.x,y:c.y,z:c.z-1});
+  }
+  return cells;
+}
+function placeTent(hit){
+  const {x,y,z} = hit.prev;
+  if(invCount(TENT)<=0) return;
+  const fx = -Math.sin(player.yaw), fz = -Math.cos(player.yaw);
+  const depthAxis = Math.abs(fx) > Math.abs(fz) ? 'x' : 'z';
+  const depthDir = (depthAxis==='x' ? fx : fz) >= 0 ? 1 : -1;
+  const cells = []; // wall:true cells become TENT; the rest just need to be clear, walkable space
+  for(let depth=0; depth<=2; depth++){
+    for(let w=-1; w<=1; w++){
+      const dx = depthAxis==='x' ? depth*depthDir : w;
+      const dz = depthAxis==='x' ? w : depth*depthDir;
+      const isDoorway  = depth===0 && w===0; // front-center: left open so you can walk in
+      const isInterior = depth===1 && w===0; // the one tile of floor space behind the doorway
+      for(let dy=0; dy<2; dy++) cells.push({ x:x+dx, y:y+dy, z:z+dz, wall: !isDoorway && !isInterior });
+      cells.push({ x:x+dx, y:y+2, z:z+dz, wall:true }); // flat roof cap over the whole footprint
+    }
+  }
+  for(const c of cells){
+    if(getBlock(c.x,c.y,c.z)!==AIR) return;
+    if(c.wall && playerOverlapsCell(c.x,c.y,c.z)) return;
+  }
+  for(const c of cells) if(c.wall) applyWorldEdit(c.x, c.y, c.z, TENT, false);
+  Scout.placed(TENT, x, z);
+  invSub(TENT,1);
+  saveInventory();
+  updateHotbarUI();
+  triggerSwing();
+  SFX.placeBlock();
+}
 function placeBlock(){
   const hit = raycastBlock();
   if(!hit || !hit.prev) return;
   const block = HOTBAR[selectedSlot];
   if(block===DOOR){ placeDoor(hit); return; }
   if(block===LADDER){ placeLadder(hit); return; }
+  if(block===TENT){ placeTent(hit); return; }
   const {x,y,z} = hit.prev;
   if(getBlock(x,y,z)!==AIR) return;
   if(invCount(block)<=0) return;
@@ -5915,6 +5904,7 @@ window.addEventListener('keydown', e=>{
   }
   if(e.code==='KeyV' && locked){ thirdPerson = !thirdPerson; return; }
   if(e.code==='KeyN' && locked){ cycleTimeMode(); return; }
+  if(e.code==='KeyK' && locked && !isDead){ trySleep(); return; }
   if(e.code==='KeyL' && locked){ player.crawlMode = !player.crawlMode; return; }
   if(e.code==='Enter'){
     // Chat itself is focused while typing, so its own keydown listener (stopPropagation) handles
@@ -5960,6 +5950,8 @@ function doInteract(){
   // untextured cube, since it has no entry in BLOCK_TILES.
   if(held===ROPE) return;
   if(hitBlock===CRAFTING_TABLE) openCrafting();
+  // A placed Backpack is just a quick way back into your own pack — same panel the I key opens.
+  else if(hitBlock===BACKPACK) openItems();
   else if(hitBlock in TOGGLE_MAP) toggleOpenable(hit.x, hit.y, hit.z, hitBlock);
   else placeBlock();
 }
@@ -5979,7 +5971,7 @@ if(isTouchDevice){
   const tapP = document.getElementById('tapToPlay');
   if(tapP) tapP.innerHTML = '<strong>Tap anywhere to play</strong>';
   const hintP = document.getElementById('playHint');
-  if(hintP) hintP.textContent = 'Break blocks to gather materials, then place your Crafting Table and tap it to craft — including windows and doors, which you can tap to open or close. Cows and sheep are harmless — dogs, giraffes, lions and elephants will fight back if you attack them, and lions and elephants will attack on sight if you get too close. Progress is saved automatically in this browser.';
+  if(hintP) hintP.textContent = 'Break blocks to gather materials, then place your Crafting Table and tap it to craft — including windows and doors, which you can tap to open or close. Rabbits and deer are harmless — the moose will fight back if you attack it, and wolves and the black bear will attack on sight if you get too close. Progress is saved automatically in this browser.';
 }
 overlay.addEventListener('click', ()=>{
   ensureAudio();
@@ -6556,7 +6548,6 @@ function animate(now){
   updateFireflies(dt);
   updateWorms(dt);
   updateButterflies(dt);
-  updateGhost(dt);
   updateBirds(dt);
   updateFish(dt);
   updateTurtles(dt);
