@@ -26,10 +26,6 @@ const FLINT=18, FIRE=19, TORCH=20, FIREWORK=21, LADDER=22, MEAT=23;
 // isn't a single cube like the rest — placing one builds a small walk-in shelter (see placeTent).
 const ROPE=24, TENT=25, CAMPFIRE=26, LANTERN=27, FLAG=28, COMPASS=29, COOKED_MEAT=30, BACKPACK=31;
 
-// Every ScoutCraft client talks to the same Firebase project as Blockcraft, so each game keeps its
-// own subtree — ScoutCraft scouts share a world with each other, never with Blockcraft players.
-const DB_ROOT = 'scoutcraft/';
-
 const BLOCK_COLOR = {
   [GRASS]:  0x5b8a3a,
   [DIRT]:   0x7a5230,
@@ -137,12 +133,13 @@ const STARVE_DAMAGE = 1;
 const MEAT_HUNGER_RESTORE = 4; // 2 icons per piece eaten
 
 // HP is scaled against the 20-HP (10-heart) human baseline to roughly track real-world size/toughness:
-// rabbits and deer are small and fragile prey; wolves match a human in raw toughness (they're
+// rabbits, squirrels and deer are small and fragile prey; wolves match a human in raw toughness (they're
 // dangerous because of their attack and pack speed, not their HP); a black bear is a serious tank;
 // a moose is the toughest animal in the woods, nearly bear-sized HP with a kick to match.
-const ANIMAL_TYPES = ['rabbit','deer','wolf','bear','moose'];
+const ANIMAL_TYPES = ['rabbit','squirrel','deer','wolf','bear','moose'];
 const ANIMAL_STATS = {
-  rabbit: { maxHp: 1*HP_PER_HEART,  dmg:0, retaliate:false, aggressive:false, speed:1.6, chaseSpeed:1.6, reach:0 },
+  rabbit:   { maxHp: 1*HP_PER_HEART,  dmg:0, retaliate:false, aggressive:false, speed:1.6, chaseSpeed:1.6, reach:0 },
+  squirrel: { maxHp: 1*HP_PER_HEART,  dmg:0, retaliate:false, aggressive:false, speed:1.9, chaseSpeed:1.9, reach:0 },
   deer:   { maxHp: 4*HP_PER_HEART,  dmg:0, retaliate:false, aggressive:false, speed:1.3, chaseSpeed:2.2, reach:0 },
   wolf:   { maxHp: 6*HP_PER_HEART,  dmg:3, retaliate:true,  aggressive:true,  speed:1.3, chaseSpeed:4.0, reach:0.2 },
   bear:   { maxHp: 16*HP_PER_HEART, dmg:5, retaliate:true,  aggressive:true,  speed:0.9, chaseSpeed:3.2, reach:0.6 },
@@ -155,12 +152,12 @@ const ANIMAL_STATS = {
 // player is 1.8 units tall). ANIMAL_SCALE is derived once below by comparing this target height
 // to each model's original bodyY.
 const ANIMAL_REAL_HEIGHT = {
-  rabbit: 0.3, deer: 1.0, wolf: 0.8, bear: 1.0, moose: 2.1,
+  rabbit: 0.3, squirrel: 0.22, deer: 1.0, wolf: 0.8, bear: 1.0, moose: 2.1,
 };
-// How much Meat killing each animal drops, non-decreasing with its real size above (rabbit is the
+// How much Meat killing each animal drops, non-decreasing with its real size above (squirrel is the
 // smallest, moose the biggest) — not a strict formula, just hand-picked round numbers in the same
 // order. Birds/fish scale by size too: large flying/aquatic species (eagle, swan, tuna) drop 2.
-const MEAT_YIELD = { rabbit:1, deer:2, wolf:2, bear:3, moose:5,
+const MEAT_YIELD = { rabbit:1, squirrel:1, deer:2, wolf:2, bear:3, moose:5,
   robin:1, sparrow:1, blue_jay:1, cardinal:1, crow:2, bluebird:1, finch:1, swallow:1, dove:1, woodpecker:1, owl:2, hawk:2, eagle:2, parrot:1, toucan:1, flamingo:2, hummingbird:1, kingfisher:1, heron:2, pelican:2, seagull:1, magpie:1, raven:2, wren:1, chickadee:1, oriole:1, warbler:1, swan:2, duck:1, goose:2,
   goldfish:1, bass:1, salmon:1, tuna:2, clownfish:1, catfish:1, shark:3, whaleshark:5,
   worm:1, gopher:2, bigeagle:3,
@@ -168,7 +165,7 @@ const MEAT_YIELD = { rabbit:1, deer:2, wolf:2, bear:3, moose:5,
 };
 // Rough horizontal collision radius per species, used for entity-vs-entity collision below.
 const ANIMAL_RADIUS = {
-  rabbit: 0.18, deer: 0.4, wolf: 0.3, bear: 0.55, moose: 0.75,
+  rabbit: 0.18, squirrel: 0.13, deer: 0.4, wolf: 0.3, bear: 0.55, moose: 0.75,
 };
 // Reproduction mechanics: animals reproduce when two of the same species meet.
 // Cooldown is set in real-time ms further below (ANIMAL_REPRODUCE_INTERVAL_MS), once
@@ -190,19 +187,22 @@ const BADGES = [
   { id:'hiking',     emoji:'🥾', name:'Hiking',       hint:'Hike 1,000 blocks on foot.',                   test:()=> scoutStats.hiked >= 1000 },
   { id:'swimming',   emoji:'🏊', name:'Swimming',     hint:'Swim 60 blocks.',                              test:()=> scoutStats.swam >= 60 },
   { id:'climbing',   emoji:'🧗', name:'Climbing',     hint:'Get 18 blocks above sea level.',               test:()=> scoutStats.highest >= 18 },
-  { id:'nature',     emoji:'🦌', name:'Nature Study', hint:'Study all 5 animals up close — the bear and moose included.', test:()=> scoutStats.species.length >= ANIMAL_TYPES.length },
+  { id:'nature',     emoji:'🦌', name:'Nature Study', hint:'Study all 6 animals up close — the bear and moose included.', test:()=> scoutStats.species.length >= ANIMAL_TYPES.length },
   { id:'nightwatch', emoji:'🦉', name:'Night Watch',  hint:'Spend 5 minutes outdoors after dark.',         test:()=> scoutStats.nightSeconds >= 300 },
   { id:'firstaid',   emoji:'⛑️',          name:'First Aid',    hint:'Heal back to full health after nearly dying.', test:()=> scoutStats.recoveries >= 1 },
   { id:'troopflag',  emoji:'🚩', name:'Troop Flag',   hint:'Raise your troop flag at camp.',               test:()=> scoutStats.flags >= 1 },
+  { id:'astronomy',  emoji:'⭐', name:'Astronomy',    hint:'Find the Big Dipper and stare at it for 10 seconds.', test:()=> scoutStats.dipperFound },
 ];
 // Ranks are purely derived from how many badges you hold — no separate progression to track.
+// Eagle Scout always means "every badge earned," so it's tied to BADGES.length rather than a number
+// that would need updating by hand every time a badge is added.
 const RANKS = [
   { min:0,  name:'Tenderfoot' },
   { min:2,  name:'Second Class' },
   { min:5,  name:'First Class' },
   { min:8,  name:'Star Scout' },
   { min:11, name:'Life Scout' },
-  { min:13, name:'Eagle Scout' },
+  { min:BADGES.length, name:'Eagle Scout' },
 ];
 function rankFor(count){
   let r = RANKS[0];
@@ -217,7 +217,7 @@ const earnedBadges = new Set();
 const scoutStats = {
   wood:0, rope:0, campfires:0, tents:0, flags:0, meals:0, compassUses:0,
   hiked:0, swam:0, highest:0, nightSeconds:0, recoveries:0, species:[],
-  campX:null, campZ:null,
+  campX:null, campZ:null, dipperFound:false,
 };
 function saveScoutProgress(){
   try{
@@ -318,6 +318,12 @@ const Scout = {
     scoutStats.species.push(name);
     checkBadges();
   },
+  foundDipper(){
+    if(scoutStats.dipperFound) return;
+    scoutStats.dipperFound = true;
+    saveScoutProgress();
+    checkBadges();
+  },
 };
 
 // ---- Continuous tracking (distance, altitude, night time, health recovery, wildlife) ----
@@ -325,6 +331,7 @@ let scoutLastX = null, scoutLastZ = null;
 let scoutWasLow = false;
 let scoutSpeciesScanTimer = 0;
 let scoutSaveTimer = 0;
+let dipperGazeTimer = 0;
 // Night, for badge purposes, is the part of the cycle with no sun at all (see DAY_KEYFRAMES:
 // sunI is 0 from 0.80 through sunrise at 0.25).
 function isScoutNight(){
@@ -336,7 +343,7 @@ const SPOT_RANGE = 9;
 function updateScout(dt){
   pumpBadgeToast(dt);
   // Nothing counts while you're sitting on the start screen or a panel — badges are for playing.
-  if(!locked || isDead){ scoutLastX = null; scoutLastZ = null; return; }
+  if(!locked || isDead){ scoutLastX = null; scoutLastZ = null; dipperGazeTimer = 0; return; }
 
   // Distance travelled, split between hiking and swimming.
   if(scoutLastX != null){
@@ -353,6 +360,15 @@ function updateScout(dt){
   if(above > scoutStats.highest) scoutStats.highest = above;
 
   if(isScoutNight()) scoutStats.nightSeconds += dt;
+
+  // Astronomy: keep the Big Dipper roughly centered in view, at night, for a continuous 10 seconds.
+  // Resets the moment you look away or day breaks — it has to be one unbroken stretch of looking up.
+  if(isScoutNight() && getLookDir(player.yaw, player.pitch).dot(BIG_DIPPER_DIR) > DIPPER_GAZE_COS){
+    dipperGazeTimer += dt;
+    if(dipperGazeTimer >= DIPPER_GAZE_SECONDS) Scout.foundDipper();
+  } else {
+    dipperGazeTimer = 0;
+  }
 
   // First aid: drop below 3 hearts, then get all the way back to full.
   if(myHP <= 3*HP_PER_HEART) scoutWasLow = true;
@@ -466,6 +482,7 @@ function badgeProgress(b){
     nightwatch: ()=> [Math.floor(scoutStats.nightSeconds), 300, 'seconds'],
     firstaid:   ()=> [scoutStats.recoveries, 1, 'recoveries'],
     troopflag:  ()=> [scoutStats.flags, 1, 'flags'],
+    astronomy:  ()=> [scoutStats.dipperFound?1:0, 1, 'found'],
   }[b.id];
   if(!p) return null;
   const [have, need, unit] = p();
@@ -1207,10 +1224,18 @@ function generateWorld(){
 // rendered like any other edit.
 const TALL_TREE_CHANCE = 0.05; // fraction of trees that grow to 5x their normal height
 const TREE_BRANCH_SPACING = 4; // vertical blocks between each branch on a tall tree's trunk
+// A minority of trees generate dead: same trunk, but most grow no canopy at all (a bare snag), and
+// the rest keep a canopy of dry brown leaves instead of their species' usual color (see treeTintAt).
+// Purely deterministic per root (x,z), like species — nothing extra to store or save.
+const DEAD_TREE_CHANCE = 0.18;
+const DEAD_TREE_LEAVES_CHANCE = 0.25; // of the dead trees, the fraction that keep brown leaves
+function isDeadTree(x,z){ return hash2(x+91,z+53) < DEAD_TREE_CHANCE; }
+function deadTreeHasLeaves(x,z){ return hash2(x+17,z+83) < DEAD_TREE_LEAVES_CHANCE; }
 function plantTreeCells(x,y,z,writeFn){
   const baseHeight = 4 + Math.floor(hash2(x+1,z+1)*3);
   const isTall = hash2(x+13,z+29) < TALL_TREE_CHANCE;
   const height = isTall ? baseHeight*5 : baseHeight;
+  const bare = isDeadTree(x,z) && !deadTreeHasLeaves(x,z);
   for(let i=0;i<height;i++) writeFn(x,y+i,z,WOOD,true);
 
   // Tall trees (5x normal height) grow branches along the trunk: short wood limbs jutting outward
@@ -1227,6 +1252,7 @@ function plantTreeCells(x,y,z,writeFn){
       const len = 2 + Math.floor(hash2(x+by*1.1, z+by*9.9)*2); // 2-3 blocks long
       let bx=x, bz=z, bY=y+by;
       for(let i=1;i<=len;i++){ bx+=dirX; bz+=dirZ; bY += (i>=len-1?1:0); writeFn(bx,bY,bz,WOOD,true); }
+      if(bare) continue; // a bare dead snag: branches, but no leaf clump on them
       for(let dy=-1;dy<=1;dy++) for(let dx=-1;dx<=1;dx++) for(let dz=-1;dz<=1;dz++){
         if(Math.abs(dx)+Math.abs(dz)+Math.abs(dy)>2) continue; // rounder clump than a full cube
         writeFn(bx+dx, bY+dy, bz+dz, LEAVES, false);
@@ -1234,6 +1260,7 @@ function plantTreeCells(x,y,z,writeFn){
     }
   }
 
+  if(bare) return; // no canopy at all — just the bare trunk (and branches, if it's tall)
   const top = y+height;
   for(let dy=-2;dy<=1;dy++){
     const r = dy>=0 ? 1 : 2;
@@ -1253,7 +1280,7 @@ function plantTree(x,y,z){
 }
 function plantTreeSynced(x,y,z){
   plantTreeCells(x,y,z,(bx,by,bz,b,unconditional)=>{
-    if(unconditional || getBlock(bx,by,bz)===AIR) applyWorldEdit(bx,by,bz,b,false);
+    if(unconditional || getBlock(bx,by,bz)===AIR) applyWorldEdit(bx, by, bz, b);
   });
 }
 // A squat, trunk-less leaf clump (1-2 blocks tall, vs. a tree's 4-6) so the world isn't wall-to-wall
@@ -1277,7 +1304,7 @@ function plantBush(x,y,z){
 }
 function plantBushSynced(x,y,z){
   plantBushCells(x,y,z,(bx,by,bz,b,unconditional)=>{
-    if(unconditional || getBlock(bx,by,bz)===AIR) applyWorldEdit(bx,by,bz,b,false);
+    if(unconditional || getBlock(bx,by,bz)===AIR) applyWorldEdit(bx, by, bz, b);
   });
 }
 
@@ -1435,6 +1462,9 @@ const TREE_SPECIES = [
   { id:'redwood', leafMul:[0.55,0.82,0.58],  woodMul:[1.15,0.50,0.42],                          leafTile:T_LEAVES_DENSE },
   { id:'apple',   leafMul:[0.95,1.12,0.62],  woodMul:[1,1,1], fruitMul:[1.6,0.25,0.22],          leafTile:T_LEAVES },
 ];
+// Dry, dead-brown canopy for the minority of dead trees that keep any leaves at all (see
+// deadTreeHasLeaves) — sparse, so a bare-looking dead tree still reads as thinning rather than lush.
+const DEAD_LEAF_TINT = { leafMul:[0.62,0.42,0.22], leafTile:T_LEAVES_SPARSE };
 function speciesIndexForRoot(x,z){ return Math.floor(hash2(x+41,z+67)*TREE_SPECIES.length) % TREE_SPECIES.length; }
 // Bounded look for canopy near a wood run's top — gates tinting to things that actually look like a
 // tree (a trunk with leaves overhead) so ordinary player-built wood walls/floors stay untinted.
@@ -1487,6 +1517,7 @@ function treeTintAt(b,x,y,z,columnSpecies){
   }
   const trunk = findTrunkColumnNear(x,y,z);
   if(!trunk) return null;
+  if(isDeadTree(trunk.x,trunk.z)) return { mul: DEAD_LEAF_TINT.leafMul, leafTile: DEAD_LEAF_TINT.leafTile };
   const species = TREE_SPECIES[speciesIndexForRoot(trunk.x,trunk.z)];
   const mul = (species.fruitMul && hash2(x*7+y*13+3, z*11+y*17+5) < 0.12) ? species.fruitMul : species.leafMul;
   return { mul, leafTile: species.leafTile };
@@ -1664,11 +1695,6 @@ function updateMinimap(){
   const S = MINIMAP_DISPLAY;
   minimapCtx.clearRect(0,0,S,S);
   minimapCtx.drawImage(minimapTerrainCanvas, 0,0, WORLD_SIZE, WORLD_SIZE, 0,0, S,S);
-  remotePlayers.forEach((e,id)=>{
-    const px = (e.mesh.position.x/WORLD_SIZE)*S, py = (e.mesh.position.z/WORLD_SIZE)*S;
-    drawMinimapTriangle(px,py,e.mesh.rotation.y,5,'#'+colorForId(id).toString(16).padStart(6,'0'));
-    drawMinimapLabel(px, py+6, e.name || 'Player');
-  });
   if(!isDead){
     const px = (player.pos.x/WORLD_SIZE)*S, py = (player.pos.z/WORLD_SIZE)*S;
     drawMinimapTriangle(px,py,player.yaw,6,'#fff2b0');
@@ -1798,10 +1824,6 @@ function animateWalk(group, state, dt, moving, sprinting){
   armL.rotation.x = -swing;
   legR.rotation.x = -swing;
 }
-function colorForId(id){
-  return new THREE.Color(`hsl(${hashIdToSeed(id)%360},60%,55%)`).getHex();
-}
-
 // ---------- Floating name/HP tag (drawn on a canvas, shown as a billboard sprite above the head) ----------
 function buildNameTagCanvas(name, hp, maxHp){
   const canvas = document.createElement('canvas');
@@ -1871,6 +1893,10 @@ const ANIMAL_HIDE = {
       ctx.fillStyle = shadeStr(0xcfc0a6, 0.8+Math.random()*0.35, 6);
       ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.fill();
     }
+  }),
+  squirrel: buildHideTexture((ctx,size)=>{
+    fillTileSized(ctx,size,0xb0764a);
+    speckleSized(ctx,size,0xb0764a,35,8);
   }),
   deer: buildHideTexture((ctx,size)=>{
     fillTileSized(ctx,size,0xa9713f);
@@ -1952,6 +1978,22 @@ const ANIMAL_BUILDERS = {
       },
     });
   },
+  squirrel(){
+    const hide = ANIMAL_HIDE_MAT.squirrel;
+    return makeQuadruped({
+      bodyW:0.24, bodyH:0.2, bodyD:0.36, bodyY:0.16, bodyMat:hide,
+      legW:0.05,
+      headW:0.16, headH:0.15, headD:0.16, headY:0.24, headZ:-0.2,
+      extras(g){
+        const earL=animalBox(0.05,0.06,0.03,hide); earL.position.set(-0.05,0.34,-0.2); g.add(earL);
+        const earR=animalBox(0.05,0.06,0.03,hide); earR.position.set(0.05,0.34,-0.2); g.add(earR);
+        // Bushy tail: three stacked segments curling up and forward over the back.
+        const t1=animalBox(0.09,0.09,0.12,hide); t1.position.set(0,0.22,0.22); g.add(t1);
+        const t2=animalBox(0.1,0.11,0.1,hide); t2.position.set(0,0.34,0.24); g.add(t2);
+        const t3=animalBox(0.1,0.12,0.09,hide); t3.position.set(0,0.44,0.18); g.add(t3);
+      },
+    });
+  },
   deer(){
     const hide = ANIMAL_HIDE_MAT.deer;
     return makeQuadruped({
@@ -2022,7 +2064,7 @@ const ANIMAL_BUILDERS = {
 };
 // Original bodyY (quadrupeds) / hip height (bipeds) each model was designed at, before rescaling.
 const ANIMAL_ORIGINAL_BODY_Y = {
-  rabbit:0.22, deer:0.85, wolf:0.42, bear:0.55, moose:1.6,
+  rabbit:0.22, squirrel:0.16, deer:0.85, wolf:0.42, bear:0.55, moose:1.6,
 };
 const ANIMAL_SCALE = {};
 for(const type of ANIMAL_TYPES) ANIMAL_SCALE[type] = ANIMAL_REAL_HEIGHT[type] / ANIMAL_ORIGINAL_BODY_Y[type];
@@ -2053,7 +2095,7 @@ function groundHeightAt(x,z){
   }
   return 1;
 }
-const SPAWN_COUNTS = { deer:5, bear:1, wolf:2, rabbit:10, moose:1 };
+const SPAWN_COUNTS = { deer:5, bear:1, wolf:2, rabbit:10, squirrel:10, moose:1 };
 function findSpawnSpot(seedX, seedZ){
   let x,z,h,tries=0;
   do{
@@ -2095,9 +2137,6 @@ function spawnAnimals(){
 }
 let respawnCheckTimer = 8;
 function newRespawnId(type){
-  // Random, not an incrementing counter: a per-session counter would start at 0 on every client
-  // and could collide with another player's respawned animal, corrupting each other's HP via the
-  // shared world/mobs sync. This is astronomically unlikely to collide across clients.
   return type+'_r'+Math.random().toString(36).slice(2,10);
 }
 function updateRespawns(dt){
@@ -2213,12 +2252,8 @@ function damageAnimal(a, dmg){
   a.hp = Math.max(0, a.hp - dmg);
   const stats = ANIMAL_STATS[a.type];
   if(stats.retaliate) a.aggroUntil = performance.now() + RETALIATE_MS;
-  if(fbReady) db.ref(DB_ROOT+'world/mobs/'+a.id+'/hp').set(a.hp);
   if(a.hp<=0){
     SFX.animalDeath();
-    // Only the client that actually lands the killing hit ever reaches this branch — a remote kill
-    // arrives through applyRemoteMobHp below instead, which never calls damageAnimal — so meat can't
-    // be double-awarded to bystanders who just see the HP sync.
     invAdd(MEAT, MEAT_YIELD[a.type] || 1);
     saveInventory();
     updateHotbarUI();
@@ -2281,13 +2316,6 @@ function damageTurtle(turtle, dmg){
     if(idx>=0) turtles.splice(idx, 1);
   }
 }
-function applyRemoteMobHp(id, hp){
-  const a = animals.find(x=>x.id===id);
-  if(!a || hp==null || hp===a.hp) return;
-  a.hp = hp;
-  if(a.hp<=0) killAnimal(a);
-}
-
 // ---------- Sound effects (synthesized with Web Audio, no audio files needed) ----------
 let audioCtx = null;
 function ensureAudio(){
@@ -2605,7 +2633,6 @@ function damagePlayer(dmg, sourceType){
   updateHeartsUI();
   flashHurt();
   SFX.hurt();
-  if(fbReady) db.ref(DB_ROOT+'players/'+myId+'/hp').set(myHP);
   if(myHP<=0) die();
 }
 function die(){
@@ -2625,16 +2652,15 @@ function respawnAfterDeath(){
   updateHeartsUI();
   myHunger = PLAYER_MAX_HUNGER;
   updateHungerUI();
-  if(fbReady) db.ref(DB_ROOT+'players/'+myId+'/hp').set(myHP);
 }
 // ---------- Sleep ----------
-// Sleeping through the night is purely local, the same way forcing Day/Night with N already is (see
-// setTimeMode) — the shared world clock is everyone's real wall-clock time, so one player turning in
-// early can't skip the night for anyone else without desyncing it. What it actually gets you: a full
-// rest (HP and hunger both topped up) and your own view jumps straight to morning.
+// Sleeping through the night can't actually fast-forward the wall clock everything else is driven
+// from (see currentDayTime), so it uses the same local override the N key does (setTimeMode) to jump
+// your own view to morning. What it actually gets you: a full rest (HP and hunger both topped up)
+// plus that jump to morning.
 let sleeping = false;
 function trySleep(){
-  if(sleeping || craftingOpen || itemsOpen || sashOpen || chatOpen) return;
+  if(sleeping || craftingOpen || itemsOpen || sashOpen) return;
   if(!nearestTent(4)){ addChatMessage('Camp', '⛺ You need to be near your tent to sleep.'); return; }
   if(!isScoutNight()){ addChatMessage('Camp', "☀️ You're not sleepy yet — try again after dark."); return; }
   sleeping = true;
@@ -2646,7 +2672,6 @@ function trySleep(){
     updateHeartsUI();
     myHunger = PLAYER_MAX_HUNGER;
     updateHungerUI();
-    if(fbReady) db.ref(DB_ROOT+'players/'+myId+'/hp').set(myHP);
     SFX.sleep();
     addChatMessage('Camp', '💤 You wake up at camp, well rested.');
     if(el) requestAnimationFrame(()=>{ el.style.transition = 'opacity 1.2s ease-in'; el.style.opacity = '0'; });
@@ -2710,20 +2735,7 @@ function findAttackTarget(){
     const dot = (dx/dist)*dir.x + (dy/dist)*dir.y + (dz/dist)*dir.z;
     if(dot>ATTACK_ANGLE_COS){ best = {type:'turtle', ref:turtle}; bestDist = dist; }
   });
-  remotePlayers.forEach((e,id)=>{
-    const dx=e.mesh.position.x-origin.x, dy=(e.mesh.position.y+1.0)-origin.y, dz=e.mesh.position.z-origin.z;
-    const dist = Math.hypot(dx,dy,dz);
-    if(dist>ATTACK_RANGE || dist>=bestDist) return;
-    const dot = (dx/dist)*dir.x + (dy/dist)*dir.y + (dz/dist)*dir.z;
-    if(dot>ATTACK_ANGLE_COS){ best = {type:'player', id, ref:e}; bestDist = dist; }
-  });
   return best;
-}
-function damageRemotePlayer(id, entry, dmg){
-  const cur = entry.hp!=null ? entry.hp : PLAYER_MAX_HP;
-  const newHp = Math.max(0, cur - dmg);
-  entry.hp = newHp;
-  if(fbReady) db.ref(DB_ROOT+'players/'+id+'/hp').set(newHp);
 }
 let lastPlayerAttack = 0;
 function tryAttack(){
@@ -2741,7 +2753,6 @@ function tryAttack(){
     else if(target.type==='gopher') damageGopher(target.ref, PLAYER_ATTACK_DMG);
     else if(target.type==='bigeagle') damageBigEagle(target.ref, PLAYER_ATTACK_DMG);
     else if(target.type==='turtle') damageTurtle(target.ref, PLAYER_ATTACK_DMG);
-    else damageRemotePlayer(target.id, target.ref, PLAYER_ATTACK_DMG);
   }
   return true;
 }
@@ -2760,57 +2771,8 @@ function updateCharacterAnim(dt, moving, sprinting){
   updateNameTag(myNameTag, myName, myHP, PLAYER_MAX_HP);
 }
 
-// ---------- Multiplayer (Firebase Realtime Database) ----------
-let fbReady = false, db = null, myId = null;
-const remotePlayers = new Map();
-function shortestAngleLerp(from, to, t){
-  let d = to - from;
-  d = Math.atan2(Math.sin(d), Math.cos(d));
-  return from + d*t;
-}
-function addRemotePlayer(id, data){
-  const mesh = createCharacterMesh(colorForId(id));
-  mesh.position.set(data.x||0, data.y||0, data.z||0);
-  mesh.rotation.y = data.yaw||0;
-  const nameTag = createNameTagSprite();
-  mesh.add(nameTag.sprite);
-  scene.add(mesh);
-  remotePlayers.set(id, {
-    mesh, target:{x:data.x||0,y:data.y||0,z:data.z||0,yaw:data.yaw||0}, walk:{phase:0,amp:0},
-    hp: data.hp!=null ? data.hp : PLAYER_MAX_HP,
-    name: (data.name || 'Player'), nameTag,
-  });
-  document.getElementById('playerCount').textContent = remotePlayers.size+1;
-}
-function updateRemotePlayer(id, data){
-  const e = remotePlayers.get(id);
-  if(!e) return addRemotePlayer(id, data);
-  e.target.x = data.x||0; e.target.y = data.y||0; e.target.z = data.z||0; e.target.yaw = data.yaw||0;
-  if(data.hp!=null) e.hp = data.hp;
-  if(data.name) e.name = data.name;
-}
-function removeRemotePlayer(id){
-  const e = remotePlayers.get(id);
-  if(!e) return;
-  scene.remove(e.mesh);
-  e.nameTag.tex.dispose();
-  remotePlayers.delete(id);
-  document.getElementById('playerCount').textContent = remotePlayers.size+1;
-}
-function updateRemotePlayers(dt){
-  remotePlayers.forEach(e=>{
-    const dist = Math.hypot(e.target.x-e.mesh.position.x, e.target.y-e.mesh.position.y, e.target.z-e.mesh.position.z);
-    const moving = dist > 0.03;
-    const t = Math.min(1, dt*10);
-    e.mesh.position.x += (e.target.x - e.mesh.position.x)*t;
-    e.mesh.position.y += (e.target.y - e.mesh.position.y)*t;
-    e.mesh.position.z += (e.target.z - e.mesh.position.z)*t;
-    e.mesh.rotation.y = shortestAngleLerp(e.mesh.rotation.y, e.target.yaw, t);
-    animateWalk(e.mesh, e.walk, dt, moving, false);
-    updateNameTag(e.nameTag, e.name, e.hp, PLAYER_MAX_HP);
-  });
-}
-function applyWorldEdit(x,y,z,val,fromRemote){
+// ---------- World edits ----------
+function applyWorldEdit(x, y, z, val){
   if(getBlock(x,y,z)===val) return;
   setBlock(x,y,z,val);
   const k = x+','+y+','+z;
@@ -2821,12 +2783,11 @@ function applyWorldEdit(x,y,z,val,fromRemote){
   onBlockChanged(x,y,z);
   onWaterRelevantEdit(x,y,z,val);
   saveEdits();
-  if(!fromRemote && fbReady) db.ref(DB_ROOT+'world/edits/'+k).set(val);
 }
 // Torches are permanent (unlike fire) — no lifecycle to track, just a light that follows the block.
-// Placement/breaking (local or synced from another player) always goes through applyWorldEdit above,
-// so hooking the light there covers every case except the very first load, handled by
-// restoreTorchLights() once after loadEdits() populates the world from localStorage.
+// Placement/breaking always goes through applyWorldEdit above, so hooking the light there covers
+// every case except the very first load, handled by restoreTorchLights() once after loadEdits()
+// populates the world from localStorage.
 const torchLights = new Map();
 // Every light-emitting block and what its glow looks like. A campfire is the brightest and warmest
 // (it's the middle of camp); a lantern is cooler and tighter, like a real glass-and-metal one.
@@ -2899,7 +2860,7 @@ function checkTreeSupport(bx, by, bz){
 function dropCluster(cells){
   // Clear the originals first (synced) so the landing/drop calc below sees a cluster-free world —
   // otherwise a piece could "land" on another piece of the very structure that's falling with it.
-  for(const [x,y,z] of cells) applyWorldEdit(x,y,z,AIR,false);
+  for(const [x,y,z] of cells) applyWorldEdit(x, y, z, AIR);
   // The drop distance is decided by the structure's LOWEST layer only (its trunk stub if any wood
   // remains, otherwise its lowest leaves) — not the minimum across every cell. Using every cell was
   // too fragile: one leaf out at the edge of the canopy happening to sit close to unrelated terrain
@@ -2934,7 +2895,7 @@ function spawnFallingCluster(cells, drop){
 }
 function settleCluster(f){
   scene.remove(f.group);
-  for(const [x,y,z,b] of f.cells) applyWorldEdit(x, y-f.drop, z, b, false);
+  for(const [x,y,z,b] of f.cells) applyWorldEdit(x, y-f.drop, z, b);
 }
 function updateFallingClusters(dt){
   for(let i=fallingClusters.length-1;i>=0;i--){
@@ -3139,6 +3100,85 @@ function updateCelestialBodies(dayTime){
   sunLight.target.position.set(player.pos.x, player.pos.y, player.pos.z);
 }
 
+// ---------- Night sky: stars + the Big Dipper ----------
+// A field of distant points plus one real, recognizable constellation — the Big Dipper, since it's
+// the one shape most people already know how to spot. Both live at a fixed distance in a fixed
+// compass direction (no real sidereal rotation — simplicity over realism), recentered on the player
+// every frame exactly like the sun/moon above, so they read as infinitely far away rather than
+// panning as you walk. Fading is the same smooth night/day blend fireflies already use.
+const STAR_COUNT = 260;
+const STAR_DOME_RADIUS = 300;
+// Fixed direction the Dipper sits in: due north (matches bearingName's -Z-is-north convention) and
+// well up in the sky, so "look north and up" is a real, learnable instruction.
+const BIG_DIPPER_DIR = new THREE.Vector3(0, Math.sin(55*Math.PI/180), -Math.cos(55*Math.PI/180)).normalize();
+const DIPPER_GAZE_COS = Math.cos(9 * Math.PI/180); // ~9° cone — generous, but you do have to aim at it
+const DIPPER_GAZE_SECONDS = 10;
+// The real ladle asterism in local (right, up) offsets around BIG_DIPPER_DIR — handle tip to bowl:
+// Alkaid, Mizar, Alioth, Megrez, then the bowl itself Megrez-Phecda-Merak-Dubhe back to Megrez.
+const DIPPER_STARS = [
+  [-4.0, 2.6], [-2.6, 2.0], [-1.3, 1.6], [0.0, 1.0], [0.1,-0.3], [1.8,-0.5], [2.0, 1.0],
+];
+const DIPPER_SEGMENTS = [[0,1],[1,2],[2,3],[3,4],[4,5],[5,6],[6,3]];
+let starPoints = null, dipperPoints = null, dipperLines = null;
+function buildStarField(){
+  const positions = new Float32Array(STAR_COUNT*3);
+  for(let i=0;i<STAR_COUNT;i++){
+    const u = Math.random(), v = Math.random();
+    const az = u*Math.PI*2, elev = v*Math.PI*0.5; // upper hemisphere only — no stars underfoot
+    positions[i*3+0] = Math.cos(elev)*Math.sin(az)*STAR_DOME_RADIUS;
+    positions[i*3+1] = Math.sin(elev)*STAR_DOME_RADIUS;
+    positions[i*3+2] = -Math.cos(elev)*Math.cos(az)*STAR_DOME_RADIUS;
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(positions,3));
+  const mat = new THREE.PointsMaterial({ color:0xffffff, size:1.6, sizeAttenuation:false, transparent:true, opacity:0, depthWrite:false, fog:false });
+  starPoints = new THREE.Points(geo, mat);
+  starPoints.renderOrder = -2;
+  scene.add(starPoints);
+
+  // Tangent-plane basis around the fixed Dipper direction, so its local (right,up) offsets above
+  // land as a small, correctly-oriented cluster in the actual sky rather than a flat world-plane.
+  const worldUp = new THREE.Vector3(0,1,0);
+  const right = new THREE.Vector3().crossVectors(worldUp, BIG_DIPPER_DIR).normalize();
+  const up = new THREE.Vector3().crossVectors(BIG_DIPPER_DIR, right).normalize();
+  const scale = 0.018; // controls the Dipper's apparent size in the sky
+  const dipperDir = (sx,sy) => BIG_DIPPER_DIR.clone()
+    .addScaledVector(right, sx*scale).addScaledVector(up, sy*scale).normalize();
+
+  const starPos = new Float32Array(DIPPER_STARS.length*3);
+  DIPPER_STARS.forEach(([sx,sy], i)=>{
+    const d = dipperDir(sx,sy).multiplyScalar(STAR_DOME_RADIUS*0.97); // just inside the star dome
+    starPos[i*3]=d.x; starPos[i*3+1]=d.y; starPos[i*3+2]=d.z;
+  });
+  const dGeo = new THREE.BufferGeometry();
+  dGeo.setAttribute('position', new THREE.BufferAttribute(starPos,3));
+  const dMat = new THREE.PointsMaterial({ color:0xfff8e0, size:4.5, sizeAttenuation:false, transparent:true, opacity:0, depthWrite:false, fog:false });
+  dipperPoints = new THREE.Points(dGeo, dMat);
+  dipperPoints.renderOrder = -2;
+  scene.add(dipperPoints);
+
+  const linePos = new Float32Array(DIPPER_SEGMENTS.length*2*3);
+  DIPPER_SEGMENTS.forEach(([a,b], i)=>{
+    linePos[i*6]=starPos[a*3]; linePos[i*6+1]=starPos[a*3+1]; linePos[i*6+2]=starPos[a*3+2];
+    linePos[i*6+3]=starPos[b*3]; linePos[i*6+4]=starPos[b*3+1]; linePos[i*6+5]=starPos[b*3+2];
+  });
+  const lGeo = new THREE.BufferGeometry();
+  lGeo.setAttribute('position', new THREE.BufferAttribute(linePos,3));
+  const lMat = new THREE.LineBasicMaterial({ color:0xfff8e0, transparent:true, opacity:0, depthWrite:false, fog:false });
+  dipperLines = new THREE.LineSegments(lGeo, lMat);
+  dipperLines.renderOrder = -2;
+  scene.add(dipperLines);
+}
+function updateStarField(){
+  const night = fireflyNightFactor();
+  starPoints.position.copy(player.pos);
+  dipperPoints.position.copy(player.pos);
+  dipperLines.position.copy(player.pos);
+  starPoints.material.opacity = night*0.9;
+  dipperPoints.material.opacity = night;
+  dipperLines.material.opacity = night*0.55;
+}
+
 let lastWorldTimeLabel = null, lastDateLabel = null;
 function updateDayNight(){
   const dayTime = currentDayTime();
@@ -3169,11 +3209,12 @@ function updateDayNight(){
   sunLight.intensity = k0.sunI + (k1.sunI-k0.sunI)*lt;
   sunLight.color.setHex(lerpColorHex(k0.sunC, k1.sunC, lt));
   updateCelestialBodies(dayTime);
+  updateStarField();
 }
 
 // ---------- Weather ----------
-// Like the day/night cycle, weather is derived straight from the wall clock — no syncing needed,
-// everyone in the shared world sees the same weather at the same time automatically.
+// Like the day/night cycle, weather is derived straight from the wall clock, so it's automatically
+// consistent across a reload with no state to save.
 const WEATHER_PERIOD_S = 1200;     // how long one weather episode lasts (20 min)
 const WEATHER_TRANSITION_S = 90;   // how long it takes to blend into a freshly-rolled episode (1.5 min)
 const WEATHER_TYPES = [
@@ -3551,25 +3592,20 @@ function updateFireflies(dt){
 }
 
 // ---------- Worms: slowly eat tree leaves, breed, turn into butterflies, and can be burned to death ----------
-// A single worm spawns on the world's trees the first time anyone loads a world. Every 0.4 in-game
-// hours (ScoutCraft's clock, not the wall clock — DAY_LENGTH_S real seconds is a full 24-hour
+// A single worm spawns on one of the world's trees the first time you ever load the game. Every 0.4
+// in-game hours (ScoutCraft's clock, not the wall clock — DAY_LENGTH_S real seconds is a full 24-hour
 // in-game day, so this works out to DAY_LENGTH_S/60 real seconds) each worm eats the nearest leaf
-// block within reach (a genuine world edit — synced/persisted like any other block change, so
-// everyone sees the same tree thin out); every 1 in-game hour (DAY_LENGTH_S/24 real seconds) it has
-// 2 children nearby. Population is capped so an unattended world can't grow it forever. Standing in
-// an active fire cell kills it instantly, same "you're in the fire" test the fire-damage tick
-// already uses for animals/players. Once a worm has personally eaten WORM_BUTTERFLY_THRESHOLD leaves
-// over its lifetime, it metamorphoses into a butterfly right where it's standing (see the Butterflies
-// section below) instead of continuing to eat/reproduce as a worm.
-// Unlike fireflies, worms themselves ARE synced — under 'world/worms/<id>' — precisely so
-// their eat/reproduce timers survive a reload: without persistence every page load reset every timer
-// to "now", so a single continuously-open tab was the only way either interval could ever actually
-// fire. Each worm's existence, position, both timestamps, and its running eaten-leaves count live in
-// Firebase (with the timestamp fields written as firebase.database.ServerValue.TIMESTAMP so clocks
-// don't need to agree); every connected client mirrors the same set of worms and independently runs
-// the eat/reproduce checks against those shared timestamps, same client-authoritative, no-transactions
-// approach already used for block edits/saplings/fires elsewhere in this file. In solo/offline play
-// (no Firebase), worms fall back to the old purely-local, resets-on-reload behavior.
+// block within reach (a genuine world edit, saved the same as any other block change); every 1
+// in-game hour (DAY_LENGTH_S/24 real seconds) it has 2 children nearby. Population is capped so an
+// unattended world can't grow it forever. Standing in an active fire cell kills it instantly, same
+// "you're in the fire" test the fire-damage tick already uses for animals/players. Once a worm has
+// personally eaten WORM_BUTTERFLY_THRESHOLD leaves over its lifetime, it metamorphoses into a
+// butterfly right where it's standing (see the Butterflies section below) instead of continuing to
+// eat/reproduce as a worm.
+// Every worm's existence, position, both timers, and its running eaten-leaves count are saved to
+// localStorage (see saveWorms/loadWorms) precisely so those timers survive a reload — without
+// persistence every page load would reset every timer to "now", so the only way either interval
+// could ever actually fire would be leaving a single tab open and never reloading it.
 const WORM_EAT_INTERVAL_MS = DAY_LENGTH_S*1000 * (2/24) / 5; // one leaf block every 0.4 in-game hours (5x the original 2)
 const WORM_REPRODUCE_INTERVAL_MS = DAY_LENGTH_S*1000 * (1/24); // 2 children every 1 in-game hour
 const WORM_CHILDREN_PER_REPRODUCE = 2;
@@ -3589,6 +3625,25 @@ const WORM_GROUND_SEARCH_INTERVAL_S = 3; // how often a grounded worm re-checks 
 const WORM_WALK_SPEED = 0.5;             // slow crawl while searching on open ground
 const worms = [];
 let wormGeo, wormMat;
+const WORMS_KEY = 'scoutcraft_worms_v1';
+function saveWorms(){
+  try{
+    localStorage.setItem(WORMS_KEY, JSON.stringify(worms.map(w=>({
+      id:w.id, x:w.x, y:w.y, z:w.z,
+      lastAteAt:w.lastAteAt, lastReproducedAt:w.lastReproducedAt, eatenCount:w.eatenCount,
+    }))));
+  }catch(e){}
+}
+function loadWorms(){
+  let list = null;
+  try{ list = JSON.parse(localStorage.getItem(WORMS_KEY) || 'null'); }catch(e){}
+  if(Array.isArray(list) && list.length){
+    for(const w of list) spawnWorm(w.id, w.x, w.y, w.z, w.lastAteAt, w.lastReproducedAt, w.eatenCount);
+    return;
+  }
+  const spot = findInitialWormSpot();
+  if(spot) createWorm(spot.x, spot.y, spot.z);
+}
 // Returns the worm's settled y if (x,y,z) is currently supported — nested inside a leaf cell, or
 // resting on solid ground directly beneath it — or null if there's nothing holding it up.
 function wormRestY(x,y,z){
@@ -3620,8 +3675,8 @@ function findInitialWormSpot(){
   }
   return null;
 }
-// Adds a worm to the local scene/array only — does not touch Firebase. Used both for genuinely new
-// worms (via createWorm, below) and to materialize a worm mirrored in from a remote 'child_added'.
+// Adds a worm to the local scene/array — used both for a genuinely new worm (via createWorm, below,
+// which passes an already block-centered position) and to restore one from loadWorms.
 function spawnWorm(id,x,y,z,lastAteAt,lastReproducedAt,eatenCount){
   if(worms.length>=WORM_MAX_POPULATION || worms.some(w=>w.id===id)) return null;
   if(!wormGeo){
@@ -3630,29 +3685,19 @@ function spawnWorm(id,x,y,z,lastAteAt,lastReproducedAt,eatenCount){
   }
   const mesh = new THREE.Mesh(wormGeo, wormMat);
   mesh.scale.set(1, 0.55, 2.4);
-  mesh.position.set(x+0.5, y+0.25, z+0.5);
+  mesh.position.set(x, y, z);
   scene.add(mesh);
-  const w = {
-    id, mesh, x:x+0.5, y:y+0.25, z:z+0.5,
-    lastAteAt, lastReproducedAt, eatenCount: eatenCount||0, phase: Math.random()*Math.PI*2,
-  };
+  const w = { id, mesh, x, y, z, lastAteAt, lastReproducedAt, eatenCount: eatenCount||0, phase: Math.random()*Math.PI*2 };
   worms.push(w);
   return w;
 }
-// Spawns a brand-new worm (initial spawn or reproduction): adds it locally AND, when online, writes
-// it to Firebase so every other client picks it up via the 'child_added' listener in initMultiplayer.
+// Spawns a brand-new worm (initial spawn or reproduction) and saves the updated population.
 function createWorm(x,y,z){
   if(worms.length>=WORM_MAX_POPULATION) return null;
   const now = Date.now();
-  const id = fbReady ? db.ref(DB_ROOT+'world/worms').push().key : ('local_'+Math.random().toString(36).slice(2,10));
-  const w = spawnWorm(id,x,y,z,now,now,0);
-  if(w && fbReady){
-    db.ref(DB_ROOT+'world/worms/'+id).set({
-      x, y, z, eatenCount: 0,
-      lastAteAt: firebase.database.ServerValue.TIMESTAMP,
-      lastReproducedAt: firebase.database.ServerValue.TIMESTAMP,
-    });
-  }
+  const id = 'w_'+Math.random().toString(36).slice(2,10);
+  const w = spawnWorm(id, x+0.5, y+0.25, z+0.5, now, now, 0);
+  if(w) saveWorms();
   return w;
 }
 function killWorm(w, reason){
@@ -3660,14 +3705,12 @@ function killWorm(w, reason){
   const i = worms.indexOf(w);
   if(i>=0) worms.splice(i,1);
   if(reason==='squashed'){
-    // Only the player directly squashing a worm awards meat — burning, aging into a butterfly, a
-    // bird eating it, or a remote deletion syncing in from another client never do.
     invAdd(MEAT, MEAT_YIELD.worm || 1);
     saveInventory();
     updateHotbarUI();
     SFX.animalDeath();
   }
-  if(reason!=='remote' && fbReady) db.ref(DB_ROOT+'world/worms/'+w.id).remove();
+  saveWorms();
 }
 function updateWorms(dt){
   const now = Date.now();
@@ -3728,15 +3771,11 @@ function updateWorms(dt){
       w.lastAteAt = now;
       const leaf = findNearestLeaf(w.x, w.y, w.z, WORM_SEARCH_RADIUS);
       if(leaf){
-        applyWorldEdit(leaf.x, leaf.y, leaf.z, AIR, false);
+        applyWorldEdit(leaf.x, leaf.y, leaf.z, AIR);
         w.x = leaf.x+0.5; w.y = leaf.y+0.25; w.z = leaf.z+0.5;
         w.eatenCount++;
       }
-      if(fbReady){
-        const update = { lastAteAt: firebase.database.ServerValue.TIMESTAMP };
-        if(leaf){ update.x = leaf.x; update.y = leaf.y; update.z = leaf.z; update.eatenCount = w.eatenCount; }
-        db.ref(DB_ROOT+'world/worms/'+w.id).update(update);
-      }
+      saveWorms();
       if(w.eatenCount>=WORM_BUTTERFLY_THRESHOLD){
         const bx=Math.floor(w.x), by=Math.floor(w.y), bz=Math.floor(w.z);
         killWorm(w, 'butterfly');
@@ -3746,12 +3785,12 @@ function updateWorms(dt){
     }
     if(now - w.lastReproducedAt >= WORM_REPRODUCE_INTERVAL_MS){
       w.lastReproducedAt = now;
-      if(fbReady) db.ref(DB_ROOT+'world/worms/'+w.id+'/lastReproducedAt').set(firebase.database.ServerValue.TIMESTAMP);
       if(worms.length<WORM_MAX_POPULATION){
         for(let i=0;i<WORM_CHILDREN_PER_REPRODUCE;i++){
           createWorm(Math.floor(w.x)+(Math.random()<0.5?-1:1), Math.floor(w.y), Math.floor(w.z)+(Math.random()<0.5?-1:1));
         }
       }
+      saveWorms();
     }
     w.mesh.position.set(w.x, w.y + Math.sin(t*1.5+w.phase)*0.04, w.z);
     w.mesh.rotation.y = Math.sin(t*0.3+w.phase)*0.6;
@@ -3851,7 +3890,7 @@ function updateGophers(dt){
         const x = cx+dx, y = cy+dy, z = cz+dz;
         const b = getBlock(x,y,z);
         if(b===DIRT || b===GRASS){
-          applyWorldEdit(x, y, z, AIR, false);
+          applyWorldEdit(x, y, z, AIR);
         }
       }
     }
@@ -3862,20 +3901,30 @@ function updateGophers(dt){
 
 // ---------- Butterflies: a worm's final form ----------
 // Once a worm has eaten WORM_BUTTERFLY_THRESHOLD leaves it stops being a worm and becomes a butterfly
-// right where it stood — colorful, and free to roam. A butterfly's flight path is never synced frame
-// by frame (that would be a firehose of writes for something purely decorative-looking); instead its
-// position is a pure function of its id-derived seed and elapsed time since birth, so every connected
-// client computes the exact same path independently with zero ongoing network traffic — the same
-// wall-clock-derived trick already used throughout this file for the sun/moon, weather, and tree
-// species. Only its existence, origin point, and birth time are ever written to Firebase, under
-// 'world/butterflies/<id>'; a butterfly's own color and flight parameters are re-derived from its id
-// on every client rather than stored. It roams broadly across the whole map (a slow, large-radius
-// drift with a faster flutter layered on top) but stays within BUTTERFLY_WATER_RANGE blocks of
-// SEA_LEVEL vertically, and dies of old age after BUTTERFLY_LIFESPAN_MS. In solo/offline play (no
-// Firebase) it's still tracked locally, just not persisted, same as an offline worm.
+// right where it stood — colorful, and free to roam. Its flight path is a pure function of its
+// id-derived seed and elapsed time since birth (the same wall-clock-derived trick used throughout
+// this file for the sun/moon, weather, and tree species), so only its id, origin point, and birth
+// time ever need saving (see saveButterflies/loadButterflies) — its color and flight parameters are
+// always re-derived from the id rather than stored. It roams broadly across the whole map (a slow,
+// large-radius drift with a faster flutter layered on top) but stays within BUTTERFLY_WATER_RANGE
+// blocks of SEA_LEVEL vertically, and dies of old age after BUTTERFLY_LIFESPAN_MS.
 const BUTTERFLY_LIFESPAN_MS = DAY_LENGTH_S*1000 * 30; // 30 in-game days
 const BUTTERFLY_WATER_RANGE = 15; // stays within this many blocks of sea level, vertically
 const butterflies = [];
+const BUTTERFLIES_KEY = 'scoutcraft_butterflies_v1';
+function saveButterflies(){
+  try{
+    localStorage.setItem(BUTTERFLIES_KEY, JSON.stringify(butterflies.map(b=>(
+      { id:b.id, x:b.originX, y:0, z:b.originZ, bornAt:b.bornAt }
+    ))));
+  }catch(e){}
+}
+function loadButterflies(){
+  try{
+    const list = JSON.parse(localStorage.getItem(BUTTERFLIES_KEY) || '[]');
+    if(Array.isArray(list)) for(const b of list) spawnButterfly(b.id, b.x, b.y, b.z, b.bornAt);
+  }catch(e){}
+}
 function hashIdToSeed(id){
   let h=0;
   for(let i=0;i<id.length;i++) h = (h*31 + id.charCodeAt(i)) >>> 0;
@@ -3994,9 +4043,8 @@ function butterflyPositionAt(seed, originX, originZ, elapsedS){
   const y = Math.max(1, Math.min(WORLD_HEIGHT-1, SEA_LEVEL + Math.sin(elapsedS/yPeriod*Math.PI*2 + yPhase)*BUTTERFLY_WATER_RANGE));
   return {x,y,z};
 }
-// Adds a butterfly to the local scene/array only — does not touch Firebase. Used both for genuinely
-// new butterflies (via createButterfly, below) and to materialize one mirrored in from a remote
-// 'child_added'.
+// Adds a butterfly to the local scene/array — used both for a genuinely new one (via createButterfly,
+// below) and to restore one from loadButterflies.
 function spawnButterfly(id,x,y,z,bornAt){
   if(butterflies.some(b=>b.id===id)) return null;
   const seed = hashIdToSeed(id);
@@ -4008,24 +4056,20 @@ function spawnButterfly(id,x,y,z,bornAt){
   butterflies.push(b);
   return b;
 }
-// Spawns a brand-new butterfly (a worm's metamorphosis): adds it locally AND, when online, writes it
-// to Firebase so every other client picks it up via the 'child_added' listener in initMultiplayer.
+// Spawns a brand-new butterfly (a worm's metamorphosis) and saves the updated population.
 function createButterfly(x,y,z){
-  const now = Date.now();
-  const id = fbReady ? db.ref(DB_ROOT+'world/butterflies').push().key : ('local_'+Math.random().toString(36).slice(2,10));
-  const b = spawnButterfly(id,x,y,z,now);
-  if(b && fbReady){
-    db.ref(DB_ROOT+'world/butterflies/'+id).set({ x, y, z, bornAt: firebase.database.ServerValue.TIMESTAMP });
-  }
+  const id = 'b_'+Math.random().toString(36).slice(2,10);
+  const b = spawnButterfly(id,x,y,z,Date.now());
+  if(b) saveButterflies();
   return b;
 }
-function killButterfly(b, fromRemote){
+function killButterfly(b){
   scene.remove(b.mesh);
   b.mesh.userData.material.map.dispose();
   b.mesh.userData.material.dispose();
   const i = butterflies.indexOf(b);
   if(i>=0) butterflies.splice(i,1);
-  if(!fromRemote && fbReady) db.ref(DB_ROOT+'world/butterflies/'+b.id).remove();
+  saveButterflies();
 }
 // A small time step used only to numerically estimate the flight direction (for facing yaw) from
 // butterflyPositionAt's layered drift+flutter curve — safer than hand-deriving an analytic velocity
@@ -4072,7 +4116,7 @@ function relocateTransitionTime(fromX, fromZ, toX, toZ, radius, baseTime){
 // approach rather than the ground animals' wander/aggro state machine — birds fly through open 3D
 // space, not along the ground, and like fireflies they're a purely local, non-persistent
 // decoration: nothing about them is saved or synced, so every client just sees its own equally-alive
-// sky. Two of each of the 30 species are aloft at any time. There's no true positional audio in this
+// sky. 20 birds are aloft at any time, cycling through the 30 species. There's no true positional audio in this
 // game's synth-only sound system, so "hearing" a tweet is faked by only ever playing one for a bird
 // currently within BIRD_EARSHOT_RADIUS, with volume scaled by how close it actually is.
 const BIRD_SPECIES = [
@@ -4107,7 +4151,7 @@ const BIRD_SPECIES = [
   { id:'duck',        name:'Duck',        body:0x2a5a3a, accent:0x8a6a3a, size:1.00, pitch:0.85 },
   { id:'goose',       name:'Goose',       body:0x8a8270, accent:0x3a3a3a, size:1.25, pitch:0.70 },
 ];
-const BIRD_COUNT = BIRD_SPECIES.length * 2;
+const BIRD_COUNT = 20;
 const BIRD_RADIUS = 32; // recycle a bird's home once it's this far (x/z) from the player
 const BIRD_EARSHOT_RADIUS = 20; // only a bird within this many blocks of the player is ever heard
 // Birds occasionally snack on nearby worms — but only once the worm population is healthy (>=
@@ -4714,6 +4758,16 @@ const SAPLING_CAP = 30;               // roughly how many can be growing across 
 const SAPLING_SPAWN_CHECK_S = 15;     // how often each client rolls the dice on spawning a new one
 const saplings = new Map(); // key "x,z" -> {y: baseY, plantedAt: ms-since-epoch}
 let saplingTickTimer = 0, saplingSpawnTimer = SAPLING_SPAWN_CHECK_S;
+const SAPLINGS_KEY = 'scoutcraft_saplings_v1';
+function saveSaplings(){
+  try{ localStorage.setItem(SAPLINGS_KEY, JSON.stringify([...saplings])); }catch(e){}
+}
+function loadSaplings(){
+  try{
+    const list = JSON.parse(localStorage.getItem(SAPLINGS_KEY) || '[]');
+    if(Array.isArray(list)) for(const [key, info] of list) saplings.set(key, info);
+  }catch(e){}
+}
 function saplingStageForElapsed(elapsedMs){
   return Math.min(SAPLING_MAX_STAGE, 1 + Math.floor(elapsedMs / SAPLING_STAGE_MS));
 }
@@ -4728,13 +4782,13 @@ function findSaplingColumn(x,y,z){
 function cancelSapling(x,z){
   const key = x+','+z;
   saplings.delete(key);
-  if(fbReady) db.ref(DB_ROOT+'world/saplings/'+key).remove();
+  saveSaplings();
 }
 function plantSapling(x,y,z){
   const key = x+','+z;
   saplings.set(key, { y, plantedAt: Date.now() });
-  applyWorldEdit(x,y,z,SAPLING,false);
-  if(fbReady) db.ref(DB_ROOT+'world/saplings/'+key).set({ y, t: firebase.database.ServerValue.TIMESTAMP });
+  applyWorldEdit(x, y, z, SAPLING);
+  saveSaplings();
 }
 function trySpawnSapling(){
   if(saplings.size >= SAPLING_CAP) return;
@@ -4761,16 +4815,16 @@ function updateSaplings(dt){
       const elapsed = now - info.plantedAt;
       if(elapsed >= SAPLING_MATURE_MS){
         for(let dy=0; dy<SAPLING_MAX_STAGE; dy++){
-          if(getBlock(x,y+dy,z)===SAPLING) applyWorldEdit(x,y+dy,z,AIR,false);
+          if(getBlock(x,y+dy,z)===SAPLING) applyWorldEdit(x, y+dy, z, AIR);
         }
         if(hash2(x+3,z+5) < BUSH_CHANCE) plantBushSynced(x,y,z); else plantTreeSynced(x,y,z);
         saplings.delete(key);
-        if(fbReady) db.ref(DB_ROOT+'world/saplings/'+key).remove();
+        saveSaplings();
         continue;
       }
       const stage = saplingStageForElapsed(elapsed);
       for(let dy=0; dy<stage; dy++){
-        if(getBlock(x,y+dy,z)===AIR) applyWorldEdit(x,y+dy,z,SAPLING,false);
+        if(getBlock(x,y+dy,z)===AIR) applyWorldEdit(x, y+dy, z, SAPLING);
       }
     }
   }
@@ -4818,7 +4872,7 @@ function updateTreeRegrowth(dt){
       if(getBlock(bx,by,bz)===AIR) missing = {x:bx,y:by,z:bz};
     });
     if(missing){
-      applyWorldEdit(missing.x, missing.y, missing.z, LEAVES, false);
+      applyWorldEdit(missing.x, missing.y, missing.z, LEAVES);
       treeRegrowCooldowns.set(key, nowS + TREE_REGROW_LEAF_INTERVAL_S);
     }
   }
@@ -4839,6 +4893,16 @@ const FIRE_DAMAGE = 2;
 const FIRE_NEIGHBOR_OFFSETS = [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]];
 const fires = new Map(); // key "x,y,z" -> {ignitedAt: ms-since-epoch}
 const fireFx = new Map(); // key -> { light, flame, phase }
+const FIRES_KEY = 'scoutcraft_fires_v1';
+function saveFires(){
+  try{ localStorage.setItem(FIRES_KEY, JSON.stringify([...fires])); }catch(e){}
+}
+function loadFires(){
+  try{
+    const list = JSON.parse(localStorage.getItem(FIRES_KEY) || '[]');
+    if(Array.isArray(list)) for(const [key, info] of list) fires.set(key, info);
+  }catch(e){}
+}
 
 // A small transparent-background sprite (not a full opaque tile like the other block textures) so
 // the crossed billboards read as a flame silhouette instead of a translucent cube.
@@ -4890,16 +4954,16 @@ function tryIgniteFire(hit){
 function igniteFire(x,y,z){
   const key = x+','+y+','+z;
   fires.set(key, { ignitedAt: Date.now() });
-  applyWorldEdit(x,y,z,FIRE,false);
-  if(fbReady) db.ref(DB_ROOT+'world/fires/'+key).set({ t: firebase.database.ServerValue.TIMESTAMP });
+  applyWorldEdit(x, y, z, FIRE);
+  saveFires();
   SFX.igniteFire();
 }
 function extinguishFire(key){
   const [x,y,z] = key.split(',').map(Number);
-  if(getBlock(x,y,z)===FIRE) applyWorldEdit(x,y,z,AIR,false);
+  if(getBlock(x,y,z)===FIRE) applyWorldEdit(x, y, z, AIR);
   fires.delete(key);
+  saveFires();
   removeFireFx(key);
-  if(fbReady) db.ref(DB_ROOT+'world/fires/'+key).remove();
 }
 let fireTickTimer = 0, fireSpreadTimer = 0, fireDamageTimer = 0;
 function updateFires(dt){
@@ -5057,7 +5121,7 @@ function updateWaterFlow(dt){
     waterFlowQueued.delete(cell.x+','+cell.y+','+cell.z);
     if(getBlock(cell.x,cell.y,cell.z)!==AIR) continue; // no longer empty — built on, or already filled
     if(!hasWaterNeighbor(cell.x,cell.y,cell.z)) continue; // stale — its water neighbor is gone now
-    applyWorldEdit(cell.x,cell.y,cell.z,WATER,false);
+    applyWorldEdit(cell.x, cell.y, cell.z, WATER);
     filled++;
     if(cell.dist<WATER_FLOW_MAX_DIST){
       for(const [dx,dy,dz] of WATER_SPREAD_OFFSETS) enqueueWaterFlow(cell.x+dx,cell.y+dy,cell.z+dz,cell.dist+1);
@@ -5075,11 +5139,9 @@ const FIREWORK_COLORS = [0xff4d4d, 0xffb347, 0xfff066, 0x7cfc8a, 0x66d9ff, 0xb38
 const FIREWORK_PARTICLES = 48;
 const SPEED_OF_SOUND = 343; // world units (~meters) per second
 const fireworks = [];
-// Shared by both the local right-click and a remote player's launch synced through Firebase (see
-// initMultiplayer's 'world/fireworks' listener), so everyone in the shared world sees and hears the
-// same rocket, not just whoever launched it. The launch whistle gets the same speed-of-sound delay
-// as the burst boom — for your own launch that's imperceptible (you're right next to it), but a
-// firework someone else set off across the map now visibly outraces its own sound for you too.
+// The launch whistle gets the same speed-of-sound delay as the burst boom — for a firework you just
+// launched that's imperceptible (you're right next to it), but it means the delay math already
+// generalizes correctly to a firework launched from anywhere else in the world.
 function spawnFireworkEffect(x,z,startY,targetY){
   const mesh = new THREE.Mesh(new THREE.SphereGeometry(0.1,6,6), new THREE.MeshBasicMaterial({color:0xfff2b0}));
   mesh.position.set(x, startY, z);
@@ -5095,12 +5157,6 @@ function launchFirework(){
   const startY = player.pos.y + player.eye;
   const targetY = startY + 9 + Math.random()*5;
   spawnFireworkEffect(x,z,startY,targetY);
-  if(fbReady){
-    const ref = db.ref(DB_ROOT+'world/fireworks').push({
-      x, y:startY, z, targetY, by:myId, t: firebase.database.ServerValue.TIMESTAMP,
-    });
-    setTimeout(()=> ref.remove(), 3000); // ephemeral event, not persistent world state
-  }
 }
 function createFireworkBurst(x,y,z){
   const n = FIREWORK_PARTICLES;
@@ -5198,157 +5254,13 @@ function toggleOpenable(x,y,z,current){
   const opening = current===WINDOW || current===DOOR; // toggling FROM the closed state
   if(current===DOOR || current===DOOR_OPEN){
     const cells = findDoorCells(x,y,z) || [{x,y,z}];
-    for(const c of cells) applyWorldEdit(c.x, c.y, c.z, TOGGLE_MAP[current], false);
+    for(const c of cells) applyWorldEdit(c.x, c.y, c.z, TOGGLE_MAP[current]);
     SFX.doorToggle(opening);
     return;
   }
-  applyWorldEdit(x, y, z, TOGGLE_MAP[current], false);
+  applyWorldEdit(x, y, z, TOGGLE_MAP[current]);
   SFX.windowToggle(opening);
 }
-let lastBroadcast = 0;
-function broadcastPosition(now){
-  if(!fbReady) return;
-  if(now - lastBroadcast < 100) return;
-  lastBroadcast = now;
-  // update(), not set(): a set() would clobber the hp field, which other clients write to directly on attack
-  db.ref(DB_ROOT+'players/'+myId).update({
-    x: Math.round(player.pos.x*100)/100,
-    y: Math.round(player.pos.y*100)/100,
-    z: Math.round(player.pos.z*100)/100,
-    yaw: Math.round(player.yaw*100)/100,
-    t: firebase.database.ServerValue.TIMESTAMP,
-  });
-}
-function initMultiplayer(){
-  if(typeof firebase==='undefined' || typeof FIREBASE_CONFIG==='undefined') return;
-  try{
-    firebase.initializeApp(FIREBASE_CONFIG);
-    db = firebase.database();
-
-    myId = localStorage.getItem('scoutcraft_player_id');
-    if(!myId){
-      myId = (crypto.randomUUID ? crypto.randomUUID() : 'p'+Math.random().toString(36).slice(2));
-      localStorage.setItem('scoutcraft_player_id', myId);
-    }
-
-    const myRef = db.ref(DB_ROOT+'players/'+myId);
-    myRef.onDisconnect().remove();
-    myRef.set({
-      x: Math.round(player.pos.x*100)/100, y: Math.round(player.pos.y*100)/100, z: Math.round(player.pos.z*100)/100,
-      yaw: Math.round(player.yaw*100)/100, hp: myHP, name: myName, t: firebase.database.ServerValue.TIMESTAMP,
-    });
-    db.ref(DB_ROOT+'players/'+myId+'/hp').on('value', snap=>{
-      const v = snap.val();
-      if(v==null || v===myHP) return;
-      myHP = v;
-      updateHeartsUI();
-      if(myHP<=0) die();
-    });
-
-    db.ref(DB_ROOT+'world/edits').on('child_added', snap=>{
-      const [x,y,z] = snap.key.split(',').map(Number);
-      applyWorldEdit(x,y,z,snap.val(),true);
-    });
-    db.ref(DB_ROOT+'world/edits').on('child_changed', snap=>{
-      const [x,y,z] = snap.key.split(',').map(Number);
-      applyWorldEdit(x,y,z,snap.val(),true);
-    });
-
-    db.ref(DB_ROOT+'world/mobs').on('child_added', snap=>{
-      applyRemoteMobHp(snap.key, snap.val() && snap.val().hp);
-    });
-    db.ref(DB_ROOT+'world/mobs').on('child_changed', snap=>{
-      applyRemoteMobHp(snap.key, snap.val() && snap.val().hp);
-    });
-
-    db.ref(DB_ROOT+'world/saplings').on('child_added', snap=>{
-      const val = snap.val();
-      if(!val || saplings.has(snap.key)) return;
-      saplings.set(snap.key, { y: val.y, plantedAt: val.t });
-    });
-    db.ref(DB_ROOT+'world/saplings').on('child_removed', snap=>{
-      saplings.delete(snap.key);
-    });
-
-    db.ref(DB_ROOT+'world/fires').on('child_added', snap=>{
-      const val = snap.val();
-      if(!val || fires.has(snap.key)) return;
-      fires.set(snap.key, { ignitedAt: val.t });
-    });
-    db.ref(DB_ROOT+'world/fires').on('child_removed', snap=>{
-      fires.delete(snap.key);
-      removeFireFx(snap.key);
-    });
-
-    db.ref(DB_ROOT+'world/fireworks').on('child_added', snap=>{
-      const val = snap.val();
-      if(!val || val.by===myId) return; // we already played our own launch locally
-      spawnFireworkEffect(val.x, val.z, val.y, val.targetY);
-    });
-
-    db.ref(DB_ROOT+'world/worms').on('child_added', snap=>{
-      const val = snap.val();
-      if(!val) return;
-      spawnWorm(snap.key, val.x||0, val.y||0, val.z||0, val.lastAteAt||Date.now(), val.lastReproducedAt||Date.now(), val.eatenCount||0);
-    });
-    db.ref(DB_ROOT+'world/worms').on('child_changed', snap=>{
-      const val = snap.val();
-      const w = worms.find(w=>w.id===snap.key);
-      if(!w || !val) return;
-      if(typeof val.x==='number'){ w.x = val.x+0.5; w.y = val.y+0.25; w.z = val.z+0.5; }
-      if(val.lastAteAt) w.lastAteAt = val.lastAteAt;
-      if(val.lastReproducedAt) w.lastReproducedAt = val.lastReproducedAt;
-      if(typeof val.eatenCount==='number') w.eatenCount = val.eatenCount;
-    });
-    db.ref(DB_ROOT+'world/worms').on('child_removed', snap=>{
-      const w = worms.find(w=>w.id===snap.key);
-      if(w) killWorm(w, 'remote');
-    });
-    // Nobody's created the first worm for this shared world yet — do it once, the same "first client
-    // in wins" approach the rest of this file relies on rather than a transaction.
-    db.ref(DB_ROOT+'world/worms').once('value').then(snap=>{
-      if(snap.exists()) return;
-      const spot = findInitialWormSpot();
-      if(spot) createWorm(spot.x, spot.y, spot.z);
-    });
-
-    db.ref(DB_ROOT+'world/butterflies').on('child_added', snap=>{
-      const val = snap.val();
-      if(!val) return;
-      spawnButterfly(snap.key, val.x||0, val.y||0, val.z||0, val.bornAt||Date.now());
-    });
-    db.ref(DB_ROOT+'world/butterflies').on('child_removed', snap=>{
-      const b = butterflies.find(b=>b.id===snap.key);
-      if(b) killButterfly(b, true);
-    });
-
-    db.ref(DB_ROOT+'chat').limitToLast(CHAT_HISTORY_LIMIT).on('child_added', snap=>{
-      const val = snap.val();
-      if(!val || val.by===myId) return; // we already added our own message locally when we sent it
-      addChatMessage(val.name||'?', val.text||'');
-    });
-
-    db.ref(DB_ROOT+'players').on('child_added', snap=>{
-      if(snap.key===myId) return;
-      addRemotePlayer(snap.key, snap.val());
-    });
-    db.ref(DB_ROOT+'players').on('child_changed', snap=>{
-      if(snap.key===myId) return;
-      updateRemotePlayer(snap.key, snap.val());
-    });
-    db.ref(DB_ROOT+'players').on('child_removed', snap=>{
-      removeRemotePlayer(snap.key);
-    });
-
-    document.getElementById('mpStatus').textContent = 'Online';
-    fbReady = true;
-  }catch(e){
-    console.warn('Multiplayer unavailable, playing solo:', e);
-    document.getElementById('mpStatus').textContent = 'Offline (solo)';
-    fbReady = false;
-  }
-}
-
 // ---------- First-person view-model (arm + held block, rendered as a separate overlay pass) ----------
 let handScene, handCamera, handGroup, armMesh, heldItemMesh;
 let handBobPhase = 0, handBobAmp = 0, swingT = 0;
@@ -5468,16 +5380,6 @@ function entityBlockedByOthers(px,pz,radius,excludeAnimal,fromX,fromZ){
       }
       if(blocked) return true;
     }
-  }
-  for(const [,rp] of remotePlayers){
-    const r = radius + player.width/2;
-    const dx=px-rp.mesh.position.x, dz=pz-rp.mesh.position.z;
-    if(dx*dx+dz*dz >= r*r) continue;
-    if(wasMoving){
-      const odx=fromX-rp.mesh.position.x, odz=fromZ-rp.mesh.position.z;
-      if(dx*dx+dz*dz >= odx*odx+odz*odz) continue;
-    }
-    return true;
   }
   return false;
 }
@@ -5662,7 +5564,6 @@ function updatePlayer(dt){
         regenTimer -= REGEN_INTERVAL;
         myHP = Math.min(PLAYER_MAX_HP, myHP + HP_PER_HEART/2);
         updateHeartsUI();
-        if(fbReady) db.ref(DB_ROOT+'players/'+myId+'/hp').set(myHP);
       }
     }
   }
@@ -5682,6 +5583,8 @@ function raycastBlock(maxDist=6, step=0.02){
   }
   return null;
 }
+let lastTreeWarningAt = 0;
+const TREE_WARNING_COOLDOWN_MS = 5000;
 function breakBlock(){
   const hit = raycastBlock();
   if(!hit) return;
@@ -5689,7 +5592,7 @@ function breakBlock(){
   if(b===BEDROCK) return;
   if(b===DOOR || b===DOOR_OPEN){
     const cells = findDoorCells(hit.x,hit.y,hit.z) || [{x:hit.x,y:hit.y,z:hit.z}];
-    for(const c of cells) applyWorldEdit(c.x, c.y, c.z, AIR, false);
+    for(const c of cells) applyWorldEdit(c.x, c.y, c.z, AIR);
     invAdd(DOOR, 1);
     saveInventory();
     updateHotbarUI();
@@ -5699,7 +5602,7 @@ function breakBlock(){
   }
   if(b===SAPLING){
     const cells = findSaplingColumn(hit.x,hit.y,hit.z);
-    for(const c of cells) applyWorldEdit(c.x, c.y, c.z, AIR, false);
+    for(const c of cells) applyWorldEdit(c.x, c.y, c.z, AIR);
     cancelSapling(hit.x, hit.z);
     updateHotbarUI();
     triggerSwing();
@@ -5717,7 +5620,7 @@ function breakBlock(){
     // a door — the alternative (COLLECTIBLE's plain 1-for-1 map) would refund a full Tent for every
     // one of its ~23 cells broken individually.
     const cells = findTentCells(hit.x,hit.y,hit.z);
-    for(const c of cells) applyWorldEdit(c.x, c.y, c.z, AIR, false);
+    for(const c of cells) applyWorldEdit(c.x, c.y, c.z, AIR);
     invAdd(TENT, 1);
     saveInventory();
     updateHotbarUI();
@@ -5725,9 +5628,18 @@ function breakBlock(){
     SFX.breakBlock();
     return;
   }
-  applyWorldEdit(hit.x, hit.y, hit.z, AIR, false);
+  applyWorldEdit(hit.x, hit.y, hit.z, AIR);
   if(COLLECTIBLE.has(b)){ invAdd(COLLECT_AS[b] || b, 1); saveInventory(); }
-  if(b===WOOD) checkTreeSupport(hit.x, hit.y, hit.z);
+  if(b===WOOD){
+    // A canopy overhead means this was a living tree, not a dead snag or something you built — the
+    // real Scout ethic is dead wood for the fire, living trees left standing. Cooldown just keeps
+    // felling one whole tree from repeating the same line for every trunk block near its canopy.
+    if(hasCanopyNear(hit.x, hit.y, hit.z) && Date.now()-lastTreeWarningAt >= TREE_WARNING_COOLDOWN_MS){
+      lastTreeWarningAt = Date.now();
+      addChatMessage('Camp', "🌳 That's a living tree — a real Scout cuts only dead wood and leaves living trees standing.");
+    }
+    checkTreeSupport(hit.x, hit.y, hit.z);
+  }
   updateHotbarUI();
   triggerSwing();
   SFX.breakBlock();
@@ -5763,7 +5675,7 @@ function placeDoor(hit){
     if(getBlock(c.x,c.y,c.z)!==AIR) return;
     if(playerOverlapsCell(c.x,c.y,c.z)) return;
   }
-  for(const c of cells) applyWorldEdit(c.x, c.y, c.z, DOOR, false);
+  for(const c of cells) applyWorldEdit(c.x, c.y, c.z, DOOR);
   invSub(DOOR,1);
   saveInventory();
   updateHotbarUI();
@@ -5784,18 +5696,20 @@ function placeLadder(hit){
     cells.push({x,y:cy,z});
   }
   if(cells.length===0) return;
-  for(const c of cells) applyWorldEdit(c.x, c.y, c.z, LADDER, false);
+  for(const c of cells) applyWorldEdit(c.x, c.y, c.z, LADDER);
   invSub(LADDER,1);
   saveInventory();
   updateHotbarUI();
   triggerSwing();
   SFX.placeBlock();
 }
-// A tent is a whole walk-in shelter, not one cube: a 3-wide, 2-tall room one block deep, closed on
-// the back and sides, with a 1-wide doorway left open in the middle of the front wall so you can
-// actually step inside, capped with a flat roof. Oriented the same way placeDoor works out a door's
-// width axis — whichever of x/z you're more square-on to becomes the tent's depth, extending away
-// from you so the entrance ends up facing back the way you were standing when you placed it.
+// A tent is a whole walk-in shelter, not one cube: a real A-frame silhouette, five blocks wide at
+// the base tapering to a one-block ridge at the top (5-3-1 — the closest a voxel slope ever gets to
+// a straight line), three rows deep, with a one-block-wide gap kept open through the front and
+// middle rows, two levels tall, so you can actually walk in and stand upright under the ridge.
+// Oriented the same way placeDoor works out a door's width axis — whichever of x/z you're more
+// square-on to becomes the tent's depth, extending away from you so the entrance ends up facing
+// back the way you were standing when you placed it.
 function findTentCells(x,y,z){
   // Flood fill rather than reconstructing the fixed shape geometrically (like findDoorCells does) —
   // a tent has too many cells for that to stay simple, and a plain bounded flood fill handles any
@@ -5819,22 +5733,27 @@ function placeTent(hit){
   const fx = -Math.sin(player.yaw), fz = -Math.cos(player.yaw);
   const depthAxis = Math.abs(fx) > Math.abs(fz) ? 'x' : 'z';
   const depthDir = (depthAxis==='x' ? fx : fz) >= 0 ? 1 : -1;
+  // How far the walls reach out from the centerline at each height — the taper that makes this read
+  // as a peaked "A" instead of a box. The top level is just the ridge: one block, always solid.
+  const REACH = [2, 1, 0];
   const cells = []; // wall:true cells become TENT; the rest just need to be clear, walkable space
   for(let depth=0; depth<=2; depth++){
-    for(let w=-1; w<=1; w++){
-      const dx = depthAxis==='x' ? depth*depthDir : w;
-      const dz = depthAxis==='x' ? w : depth*depthDir;
-      const isDoorway  = depth===0 && w===0; // front-center: left open so you can walk in
-      const isInterior = depth===1 && w===0; // the one tile of floor space behind the doorway
-      for(let dy=0; dy<2; dy++) cells.push({ x:x+dx, y:y+dy, z:z+dz, wall: !isDoorway && !isInterior });
-      cells.push({ x:x+dx, y:y+2, z:z+dz, wall:true }); // flat roof cap over the whole footprint
+    const back = depth===2; // the far row is a plain solid gable end, no opening at any height
+    for(let dy=0; dy<REACH.length; dy++){
+      const reach = REACH[dy];
+      for(let w=-reach; w<=reach; w++){
+        const dx = depthAxis==='x' ? depth*depthDir : w;
+        const dz = depthAxis==='x' ? w : depth*depthDir;
+        const isOpening = !back && dy<=1 && w===0; // door (front row) / headroom (middle row)
+        cells.push({ x:x+dx, y:y+dy, z:z+dz, wall: !isOpening });
+      }
     }
   }
   for(const c of cells){
     if(getBlock(c.x,c.y,c.z)!==AIR) return;
     if(c.wall && playerOverlapsCell(c.x,c.y,c.z)) return;
   }
-  for(const c of cells) if(c.wall) applyWorldEdit(c.x, c.y, c.z, TENT, false);
+  for(const c of cells) if(c.wall) applyWorldEdit(c.x, c.y, c.z, TENT);
   Scout.placed(TENT, x, z);
   invSub(TENT,1);
   saveInventory();
@@ -5853,7 +5772,7 @@ function placeBlock(){
   if(getBlock(x,y,z)!==AIR) return;
   if(invCount(block)<=0) return;
   if(playerOverlapsCell(x,y,z)) return;
-  applyWorldEdit(x, y, z, block, false);
+  applyWorldEdit(x, y, z, block);
   Scout.placed(block, x, z);
   if(block===WATER) seedWaterFlowFromPlacement(x, y, z);
   invSub(block,1);
@@ -5906,12 +5825,6 @@ window.addEventListener('keydown', e=>{
   if(e.code==='KeyN' && locked){ cycleTimeMode(); return; }
   if(e.code==='KeyK' && locked && !isDead){ trySleep(); return; }
   if(e.code==='KeyL' && locked){ player.crawlMode = !player.crawlMode; return; }
-  if(e.code==='Enter'){
-    // Chat itself is focused while typing, so its own keydown listener (stopPropagation) handles
-    // Enter-to-send/Escape-to-cancel from here on — this only ever fires the "not open yet" case.
-    if(!chatOpen && !craftingOpen && !itemsOpen && locked && !isDead) openChat();
-    return;
-  }
   const slotIdx = HOTBAR_KEYS.indexOf(e.code);
   if(slotIdx>=0 && slotIdx<HOTBAR.length){
     selectedSlot = slotIdx; updateHotbarUI(); updateHeldItemColor();
@@ -5967,7 +5880,7 @@ nameInput.addEventListener('keydown', e=> e.stopPropagation());
 if(isTouchDevice){
   document.body.classList.add('touch-device');
   const controlsP = document.getElementById('controlsText');
-  if(controlsP) controlsP.innerHTML = 'A tiny Minecraft-inspired voxel sandbox that runs entirely in your browser.<br><br>Left stick: move &nbsp; Drag right side: look<br>⛏ break/attack &nbsp; ▦ place/interact &nbsp; JUMP jump &nbsp; CRAWL hold to crawl &nbsp; 3rd camera &nbsp; 🕐 cycle day/night &nbsp; 💬 chat';
+  if(controlsP) controlsP.innerHTML = 'A tiny Minecraft-inspired voxel sandbox that runs entirely in your browser.<br><br>Left stick: move &nbsp; Drag right side: look<br>⛏ break/attack &nbsp; ▦ place/interact &nbsp; JUMP jump &nbsp; CRAWL hold to crawl &nbsp; 3rd camera &nbsp; 🕐 cycle day/night';
   const tapP = document.getElementById('tapToPlay');
   if(tapP) tapP.innerHTML = '<strong>Tap anywhere to play</strong>';
   const hintP = document.getElementById('playHint');
@@ -5979,7 +5892,6 @@ overlay.addEventListener('click', ()=>{
   const typedName = nameInput.value.trim().slice(0,16);
   if(typedName) myName = typedName;
   try{ localStorage.setItem('scoutcraft_player_name', myName); }catch(e){}
-  if(fbReady && myId) db.ref(DB_ROOT+'players/'+myId+'/name').set(myName);
   if(isTouchDevice){
     locked = true;
     overlay.hidden = true;
@@ -6004,7 +5916,7 @@ overlay.addEventListener('click', ()=>{
 document.addEventListener('pointerlockchange', ()=>{
   if(isTouchDevice) return;
   locked = document.pointerLockElement === document.body;
-  overlay.hidden = locked || craftingOpen || itemsOpen || chatOpen;
+  overlay.hidden = locked || craftingOpen || itemsOpen;
 });
 document.addEventListener('mousemove', e=>{
   if(!locked || isTouchDevice) return;
@@ -6100,7 +6012,6 @@ if(isTouchDevice){
   bindTouchButton('btnCrawl', ()=>{ keys['ControlLeft']=true; crawlBtn.classList.add('active'); }, ()=>{ keys['ControlLeft']=false; crawlBtn.classList.remove('active'); });
   bindTouchButton('btn3p', ()=>{ if(locked) thirdPerson = !thirdPerson; });
   bindTouchButton('btnTime', ()=>{ if(locked) cycleTimeMode(); });
-  bindTouchButton('btnChat', ()=>{ if(locked && !isDead) openChat(); });
 }
 
 // ---------- Debug panel (Alt+Shift+D) ----------
@@ -6167,8 +6078,6 @@ function renderDebugPanel(){
       <tr><td>Fish</td><td>${fish.length}</td></tr>
       <tr><td>Active fires</td><td>${fires.size}</td></tr>
       <tr><td>Falling clusters</td><td>${fallingClusters.length}</td></tr>
-      <tr><td>Players online</td><td>${remotePlayers.size+1}</td></tr>
-      <tr><td>Multiplayer</td><td>${fbReady?'Online':'Offline (solo)'}</td></tr>
       <tr><td>Your position</td><td>${player.pos.x.toFixed(1)}, ${player.pos.y.toFixed(1)}, ${player.pos.z.toFixed(1)}</td></tr>
       <tr><td>Your chunk</td><td>${chunkX}, ${chunkZ}</td></tr>
       <tr><td>World size</td><td>${WORLD_SIZE}×${WORLD_SIZE}×${WORLD_HEIGHT}</td></tr>
@@ -6367,26 +6276,12 @@ function renderItemsGrid(){
   }
 }
 
-// ---------- Chat ----------
-// Enter opens a text box; Enter again sends, Escape cancels — the exact same exitPointerLock()-while-
-// open / requestPointerLock()-to-resume pattern crafting/items already use, so typing never fights
-// with WASD/mouse-look. The input itself stops its own keydown from bubbling to the game's global
-// handler (the same trick the pre-game name field already relies on), so none of the letters you type
-// ever get misread as a hotbar/inventory/craft shortcut.
-// Messages sync through Firebase under 'chat/<id>' like everything else in the shared world, read back
-// via a query capped to CHAT_HISTORY_LIMIT so a long-lived world's full chat history is never fully
-// downloaded or held in memory — only the most recent messages. A sent message is added to the local
-// log immediately (optimistic, matching how block edits/fireworks already work) and the 'by' field
-// lets the child_added listener recognize and skip its own message when Firebase echoes it back.
-const CHAT_HISTORY_LIMIT = 50;
+// ---------- Camp log ----------
+// A small on-screen message log for local feedback (cooking hints, sleep, badge-adjacent tips) —
+// there's no chat to send here, single-player has no one else to send it to.
 const CHAT_DISPLAY_LIMIT = 8; // how many recent lines actually stay on screen
-const CHAT_MIN_SEND_INTERVAL_MS = 600; // a light guard against accidental double-sends, not moderation
-let chatOpen = false;
-let lastChatSendAt = 0;
 const chatMessages = [];
 const chatLogEl = document.getElementById('chatLog');
-const chatInputBar = document.getElementById('chatInputBar');
-const chatInput = document.getElementById('chatInput');
 function escapeHtml(s){
   return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
 }
@@ -6397,45 +6292,9 @@ function renderChatLog(){
 }
 function addChatMessage(name, text){
   chatMessages.push({ name, text });
-  if(chatMessages.length > CHAT_HISTORY_LIMIT) chatMessages.shift();
+  if(chatMessages.length > CHAT_DISPLAY_LIMIT*4) chatMessages.shift();
   renderChatLog();
 }
-function openChat(){
-  if(chatOpen || craftingOpen || itemsOpen || isDead) return;
-  chatOpen = true;
-  chatInputBar.hidden = false;
-  chatInput.value = '';
-  if(document.pointerLockElement) document.exitPointerLock();
-  if(isTouchDevice) locked = false;
-  overlay.hidden = true;
-  chatInput.focus();
-}
-function closeChat(relock){
-  chatOpen = false;
-  chatInputBar.hidden = true;
-  chatInput.blur();
-  if(relock){
-    if(isTouchDevice) locked = true;
-    else document.body.requestPointerLock();
-  } else if(!isTouchDevice) overlay.hidden = false;
-}
-function sendChatMessage(){
-  const text = chatInput.value.trim().slice(0,200);
-  const now = Date.now();
-  if(text && now-lastChatSendAt >= CHAT_MIN_SEND_INTERVAL_MS){
-    lastChatSendAt = now;
-    addChatMessage(myName, text);
-    if(fbReady) db.ref(DB_ROOT+'chat').push({ name: myName, text, by: myId, t: firebase.database.ServerValue.TIMESTAMP });
-  }
-  closeChat(true);
-}
-chatInput.addEventListener('click', e=> e.stopPropagation());
-chatInput.addEventListener('touchstart', e=> e.stopPropagation());
-chatInput.addEventListener('keydown', e=>{
-  e.stopPropagation();
-  if(e.code==='Enter') sendChatMessage();
-  else if(e.code==='Escape') closeChat(true);
-});
 
 // ---------- Init & loop ----------
 function init(){
@@ -6478,6 +6337,7 @@ function init(){
   scene.add(sunLight);
   scene.add(sunLight.target);
   buildCelestialBodies();
+  buildStarField();
 
   characterMesh = createCharacterMesh();
   characterMesh.visible = false;
@@ -6501,14 +6361,10 @@ function init(){
   updateHeldItemColor();
   updateHeartsUI();
   updateHungerUI();
-  initMultiplayer();
-  // Firebase (when available) owns worm creation — see the 'world/worms' once('value') check in
-  // initMultiplayer — so a fresh, unconnected worm doesn't pop into existence on every single client's
-  // load. Solo/offline play has no such shared state to check, so it keeps the old local-only spawn.
-  if(!fbReady){
-    const spot = findInitialWormSpot();
-    if(spot) spawnWorm('local_'+Math.random().toString(36).slice(2,10), spot.x, spot.y, spot.z, Date.now(), Date.now(), 0);
-  }
+  loadSaplings();
+  loadFires();
+  loadWorms();
+  loadButterflies();
 
   window.addEventListener('resize', ()=>{
     camera.aspect = window.innerWidth/window.innerHeight;
@@ -6536,7 +6392,6 @@ function animate(now){
   const sprinting = !!(keys['ShiftLeft']||keys['ShiftRight']);
   updateCharacterAnim(dt, moving, sprinting);
   updateHandView(dt, moving, sprinting);
-  updateRemotePlayers(dt);
   updateAnimals(dt);
   updateRespawns(dt);
   updateFallingClusters(dt);
@@ -6559,7 +6414,6 @@ function animate(now){
   updateWeather(dt);
   updateTemperature(dt);
   updateHunger(dt);
-  broadcastPosition(now);
 
   if(thirdPerson){
     characterMesh.visible = true;

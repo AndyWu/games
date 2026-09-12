@@ -68,13 +68,9 @@
   #btnCrawl.active{background:rgba(255,255,255,0.4);}
   #btn3p{right:16px;top:10px;width:44px;height:44px;font-size:16px;z-index:11;}
   #btnTime{right:66px;top:10px;width:44px;height:44px;font-size:16px;z-index:11;}
-  #btnChat{right:16px;top:60px;width:44px;height:44px;font-size:18px;z-index:11;}
-  #chatLog{position:fixed;left:10px;bottom:130px;width:min(420px,calc(100vw - 20px));max-height:200px;overflow-y:auto;display:flex;flex-direction:column;gap:2px;z-index:12;pointer-events:none;}
+  #chatLog{position:fixed;left:10px;bottom:96px;width:min(420px,calc(100vw - 20px));max-height:200px;overflow-y:auto;display:flex;flex-direction:column;gap:2px;z-index:12;pointer-events:none;}
   .chatLine{background:rgba(0,0,0,0.45);color:#fff;font-size:13px;padding:3px 8px;border-radius:4px;text-shadow:0 0 3px #000;word-break:break-word;align-self:flex-start;max-width:100%;}
   .chatLine b{color:#8fd0ee;}
-  #chatInputBar{position:fixed;left:10px;bottom:96px;width:min(420px,calc(100vw - 20px));z-index:26;}
-  #chatInput{width:100%;box-sizing:border-box;font-size:14px;padding:8px 10px;border-radius:6px;border:2px solid rgba(255,255,255,0.5);background:rgba(0,0,0,0.8);color:#fff;outline:none;}
-  #chatInput::placeholder{color:rgba(255,255,255,0.55);}
   #craftHint{position:fixed;bottom:80px;left:50%;transform:translateX(-50%);color:#fff;font-size:13px;font-weight:600;text-shadow:0 0 4px #000;z-index:11;opacity:0;transition:opacity 0.15s;pointer-events:none;background:rgba(0,0,0,0.4);padding:6px 12px;border-radius:6px;}
   #craftHint.show{opacity:1;}
   #craftingModal{position:fixed;inset:0;z-index:30;background:rgba(0,0,0,0.55);display:flex;align-items:center;justify-content:center;}
@@ -153,7 +149,7 @@
 </style>
 </head>
 <body>
-<div id="hud">📍<span id="coordsLabel">0, 0, 0</span> · Edits <span id="blockCount">0</span> · <span id="fps">0</span>fps · 👥<span id="playerCount">1</span> · <span id="mpStatus">Connecting…</span> · 📅<span id="dateLabel">Jan 1, Y0</span> · 🕐<span id="worldTimeLabel">00:00</span><span id="timeModeLabel"></span> · <span id="weatherLabel">Sunny</span> · <span id="windLabel">Calm</span> · <span id="seasonLabel">Spring</span> <span id="tempLabel">50°F</span> · 🐛<span id="wormCount">0</span> · 🦋<span id="butterflyCount">0</span> · 🎖️<span id="badgeCount">0/13</span> · <span id="rankLabel">Tenderfoot</span></div>
+<div id="hud">📍<span id="coordsLabel">0, 0, 0</span> · Edits <span id="blockCount">0</span> · <span id="fps">0</span>fps · 📅<span id="dateLabel">Jan 1, Y0</span> · 🕐<span id="worldTimeLabel">00:00</span><span id="timeModeLabel"></span> · <span id="weatherLabel">Sunny</span> · <span id="windLabel">Calm</span> · <span id="seasonLabel">Spring</span> <span id="tempLabel">50°F</span> · 🐛<span id="wormCount">0</span> · 🦋<span id="butterflyCount">0</span> · 🎖️<span id="badgeCount">0/13</span> · <span id="rankLabel">Tenderfoot</span></div>
 <div id="debugPanel" hidden></div>
 <div id="updateBanner" hidden>🔄 A new version of ScoutCraft is available <button id="updateReloadBtn">Reload</button></div>
 <div id="minimap"><canvas id="minimapCanvas" width="160" height="160"></canvas></div>
@@ -166,10 +162,9 @@
 <div id="badgeToast" hidden></div>
 <div id="crosshair"></div>
 <div id="hotbar"></div>
-<div id="hint">Left click: break / attack &nbsp;·&nbsp; Right click: place (or cook raw meat on a campfire / take a bearing with the compass / open a table or backpack / toggle a window or door) &nbsp;·&nbsp; Q R F T G C X Z B: select item &nbsp;·&nbsp; I: pack &nbsp;·&nbsp; M: badge sash &nbsp;·&nbsp; E: craft &nbsp;·&nbsp; K: sleep in tent &nbsp;·&nbsp; V: 3rd person &nbsp;·&nbsp; Ctrl: hold to crawl &nbsp;·&nbsp; L: toggle crawl &nbsp;·&nbsp; N: cycle day/night &nbsp;·&nbsp; Enter: chat &nbsp;·&nbsp; Esc: release mouse</div>
+<div id="hint">Left click: break / attack &nbsp;·&nbsp; Right click: place (or cook raw meat on a campfire / take a bearing with the compass / open a table or backpack / toggle a window or door) &nbsp;·&nbsp; Q R F T G C X Z B: select item &nbsp;·&nbsp; I: pack &nbsp;·&nbsp; M: badge sash &nbsp;·&nbsp; E: craft &nbsp;·&nbsp; K: sleep in tent &nbsp;·&nbsp; V: 3rd person &nbsp;·&nbsp; Ctrl: hold to crawl &nbsp;·&nbsp; L: toggle crawl &nbsp;·&nbsp; N: cycle day/night &nbsp;·&nbsp; Esc: release mouse</div>
 <div id="craftHint">Right-click the table (or press E) to craft</div>
 <div id="chatLog"></div>
-<div id="chatInputBar" hidden><input id="chatInput" type="text" maxlength="200" placeholder="Press Enter to send, Esc to cancel" autocomplete="off"></div>
 <div id="touchControls" hidden>
   <div id="touchLookZone"></div>
   <div id="joystickBase"><div id="joystickKnob"></div></div>
@@ -179,7 +174,6 @@
   <button id="btnCrawl" class="touchBtn" aria-label="Hold to crawl">CRAWL</button>
   <button id="btn3p" class="touchBtn" aria-label="Toggle third person">3rd</button>
   <button id="btnTime" class="touchBtn" aria-label="Cycle day/night">🕐</button>
-  <button id="btnChat" class="touchBtn" aria-label="Open chat">💬</button>
 </div>
 <div id="craftingModal" hidden>
   <div id="craftingPanel">
@@ -224,16 +218,13 @@
     woodcraft, firecraft and a good tent actually count for something.<br><br>
     <span class="key">WASD</span> move &nbsp; <span class="key">Space</span> jump &nbsp; <span class="key">Shift</span> sprint &nbsp; <span class="key">Ctrl</span> crawl &nbsp; <span class="key">L</span> toggle crawl<br>
     <span class="key">Mouse</span> look &nbsp; <span class="key">Left click</span> break / attack &nbsp; <span class="key">Right click</span> place<br>
-    <span class="key">Q R F T G C X Z B</span> select item &nbsp; <span class="key">I</span> pack &nbsp; <span class="key">M</span> badge sash &nbsp; <span class="key">E</span> craft at workbench &nbsp; <span class="key">K</span> sleep in tent &nbsp; <span class="key">V</span> 3rd person &nbsp; <span class="key">N</span> cycle day/night &nbsp; <span class="key">Enter</span> chat
+    <span class="key">Q R F T G C X Z B</span> select item &nbsp; <span class="key">I</span> pack &nbsp; <span class="key">M</span> badge sash &nbsp; <span class="key">E</span> craft at workbench &nbsp; <span class="key">K</span> sleep in tent &nbsp; <span class="key">V</span> 3rd person &nbsp; <span class="key">N</span> cycle day/night
   </p>
   <div id="nameEntry"><input id="nameInput" type="text" maxlength="16" placeholder="Your name" autocomplete="off"></div>
   <p id="tapToPlay"><strong>Click anywhere to play</strong></p>
   <p id="playHint" class="small">Chop a tree for wood and leaves, put down your Camp Workbench, and press E beside it to craft. Twist leaves into <b>rope</b>, then build a <b>tent</b> you can actually walk into, a <b>campfire</b>, a <b>lantern</b>, a <b>compass</b>, a <b>backpack</b> and your <b>troop flag</b> — each one earns a merit badge, and badges promote you from Tenderfoot all the way to Eagle Scout. Press <span class="key">M</span> to see your sash, or <span class="key">K</span> near your tent after dark to sleep through the night. Cook raw meat on a campfire for a meal worth twice as much. Rabbits and deer are harmless — moose fight back if provoked, and wolves and the black bear attack on sight. Progress saves automatically in this browser.</p>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-database-compat.js"></script>
-<script src="firebase-config.js"></script>
 <script src="main.js"></script>
 </body>
 </html>
